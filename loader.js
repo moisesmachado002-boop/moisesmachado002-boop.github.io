@@ -1,5 +1,5 @@
 (async () => {
-  const VERSION = '1.5.1';
+  const VERSION = '1.5.2';
   window.__APP_VERSION = VERSION;
   const bodyParts = ["body.01.txt", "body.02.txt", "body.03.txt", "body.04.txt", "body.05.txt"];
   const styleParts = ["style.01.txt", "style.02.txt", "style.03.txt"];
@@ -16,6 +16,7 @@
     (0, eval)(js);
     await loadScript(versioned('./category-fix.js'));
     await loadScript(versioned('./loans.js'));
+    await loadScript(versioned('./auth-redirect-fix.js'));
   } catch (err) {
     document.body.innerHTML = '<div style="font-family:system-ui;padding:24px">Não foi possível carregar o Meu Financeiro. Verifique sua internet e atualize a página.</div>';
     console.error(err);
