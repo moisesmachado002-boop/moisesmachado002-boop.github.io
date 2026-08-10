@@ -1,0 +1,148 @@
+yments: Array.isArray(source.billPayments) ? source.billPayments : [],
+      goals: Array.isArray(source.goals) ? source.goals : [],
+      openingBalances: { ...base.openingBalances, ...(source.openingBalances || {}) }
+    };
+  }
+
+  function readStoredState(key) {
+    try {
+      const raw = key ? localStorage.getItem(key) : null;
+      return raw ? normalizeState(JSON.parse(raw)) : null;
+    } catch {
+      return null;
+    }
+  }
+
+  function loadLegacyState() {
+    return readStoredState(LEGACY_STORAGE_KEY);
+  }
+
+  function userStorageKey(userId) {
+    return `${USER_STORAGE_PREFIX}${userId}`;
+  }
+
+  function persistLocalState() {
+    if (!activeStorageKey) return;
+    localStorage.setItem(activeStorageKey, JSON.stringify(state));
+  }
+
+  function hasMeaningfulData(candidate) {
+    if (!candidate) return false;
+    return Boolean(
+      candidate.transactions?.length || candidate.cards?.length || candidate.purchases?.length ||
+      candidate.bills?.length || candidate.billPayments?.length || candidate.goals?.length ||
+      Number(candidate.openingBalances?.account) || Number(candidate.openingBalances?.cash)
+    );
+  }
+
+  function stateTimestamp(candidate) {
+    const t = Date.parse(candidate?._meta?.updatedAt || '');
+    return Number.isFinite(t) ? t : 0;
+  }
+
+  function saveState() {
+    state = normalizeState(state);
+    state._meta.updatedAt = new Date().toISOString();
+    persistLocalState();
+    cloudDirty = true;
+    queueCloudSave();
+  }
+
+  function queueCloudSave() {
+    if (!currentUser || !supabaseClient) return;
+    clearTimeout(cloudSaveTimer);
+    setSyncStatus(navigator.onLine ? 'Salvando...' : 'Sem internet', navigator.onLine ? 'syncing' : 'offline');
+    if (!navigator.onLine) return;
+    cloudSaveTimer = setTimeout(() => pushCloudState(), 450);
+  }
+
+  async function pushCloudState(force = false) {
+    if (!currentUser || !supabaseClient || (!cloudDirty && !force)) return;
+    if (!navigator.onLine) {
+      setSyncStatus('Sem internet', 'offline');
+      return;
+    }
+    if (cloudSaveInFlight) {
+      cloudSaveQueued = true;
+      return;
+    }
+    cloudSaveInFlight = true;
+    setSyncStatus('Salvando...', 'syncing');
+    const snapshot = JSON.parse(JSON.stringify(state));
+    try {
+      const { error } = await supabaseClient
+        .from('finance_state')
+        .upsert({ user_id: currentUser.id, data: snapshot }, { onConflict: 'user_id' });
+      if (error) throw error;
+      if (stateTimestamp(state) <= stateTimestamp(snapshot)) cloudDirty = false;
+      setSyncStatus('Sincronizado', 'synced');
+    } catch (error) {
+      console.error('Erro ao salvar na nuvem:', error);
+      cloudDirty = true;
+      setSyncStatus(navigator.onLine ? 'Erro ao sincronizar' : 'Sem internet', navigator.onLine ? 'error' : 'offline');
+    } finally {
+      cloudSaveInFlight = false;
+      if (cloudSaveQueued) {
+        cloudSaveQueued = false;
+        setTimeout(() => pushCloudState(), 100);
+      }
+    }
+  }
+
+  async function initAuthSession() {
+    setAuthMessage('Verificando sua sessão...');
+    const { data, error } = await supabaseClient.auth.getSession();
+    if (error) setAuthMessage(`Não foi possível verificar o login: ${friendlyAuthError(error)}`, 'error');
+    if (data?.session?.user) await activateUser(data.session.user);
+    else showAuthGate();
+
+    supabaseClient.auth.onAuthStateChange((event, session) => {
+      setTimeout(() => {
+        if (event === 'SIGNED_OUT') deactivateUser();
+        else if ((event === 'SIGNED_IN' || event === 'INITIAL_SESSION') && session?.user && session.user.id !== currentUser?.id) activateUser(session.user);
+      }, 0);
+    });
+  }
+
+  function bindAuth() {
+    els.authForm.addEventListener('submit', async event => {
+      event.preventDefault();
+      if (!supabaseClient) return;
+      const fd = new FormData(event.currentTarget);
+      const email = String(fd.get('email') || '').trim();
+      const password = String(fd.get('password') || '');
+      if (!email || password.length < 6) return setAuthMessage('Informe um e-mail válido e uma senha com pelo menos 6 caracteres.', 'error');
+      setAuthBusy(true, 'Entrando...');
+      const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password });
+      if (error) {
+        setAuthMessage(friendlyAuthError(error), 'error');
+        setAuthBusy(false);
+        return;
+      }
+      if (data?.user) await activateUser(data.user);
+      setAuthBusy(false);
+    });
+
+    els.signUpBtn.addEventListener('click', async () => {
+      if (!supabaseClient) return;
+      const fd = new FormData(els.authForm);
+      const email = String(fd.get('email') || '').trim();
+      const password = String(fd.get('password') || '');
+      if (!email || password.length < 6) return setAuthMessage('Digite o e-mail e uma senha com pelo menos 6 caracteres para criar a conta.', 'error');
+      setAuthBusy(true, 'Criando conta...');
+      const { data, error } = await supabaseClient.auth.signUp({ email, password });
+      if (error) {
+        setAuthMessage(friendlyAuthError(error), 'error');
+        setAuthBusy(false);
+        return;
+      }
+      if (data?.session?.user) {
+        setAuthMessage('Conta criada. Entrando...', 'success');
+        await activateUser(data.session.user);
+      } else {
+        setAuthMessage('Conta criada. Abra o e-mail de confirmação enviado pelo Supabase, confirme e depois volte aqui para entrar.', 'success');
+      }
+      setAuthBusy(false);
+    });
+
+    $('#logoutBtn').addEve
