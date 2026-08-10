@@ -1,9 +1,9 @@
-const CACHE = 'meu-financeiro-v1-3-5';
+const CACHE = 'meu-financeiro-v1-4-0';
 const STATIC_ASSETS = [
-  './manifest.json?v=1.3.5', './icon.svg', './category-fix.js?v=1.3.5',
-  './body.01.txt?v=1.3.5', './body.02.txt?v=1.3.5', './body.03.txt?v=1.3.5', './body.04.txt?v=1.3.5', './body.05.txt?v=1.3.5',
-  './style.01.txt?v=1.3.5', './style.02.txt?v=1.3.5', './style.03.txt?v=1.3.5',
-  './app.01.txt?v=1.3.5', './app.02.txt?v=1.3.5', './app.03.txt?v=1.3.5', './app.04.txt?v=1.3.5', './app.05.txt?v=1.3.5', './app.06.txt?v=1.3.5', './app.07.txt?v=1.3.5', './app.08.txt?v=1.3.5', './app.09.txt?v=1.3.5', './app.10.txt?v=1.3.5', './app.11.txt?v=1.3.5'
+  './manifest.json?v=1.4.0', './icon.svg', './category-fix.js?v=1.4.0', './loans.js?v=1.4.0',
+  './body.01.txt?v=1.4.0', './body.02.txt?v=1.4.0', './body.03.txt?v=1.4.0', './body.04.txt?v=1.4.0', './body.05.txt?v=1.4.0',
+  './style.01.txt?v=1.4.0', './style.02.txt?v=1.4.0', './style.03.txt?v=1.4.0',
+  './app.01.txt?v=1.4.0', './app.02.txt?v=1.4.0', './app.03.txt?v=1.4.0', './app.04.txt?v=1.4.0', './app.05.txt?v=1.4.0', './app.06.txt?v=1.4.0', './app.07.txt?v=1.4.0', './app.08.txt?v=1.4.0', './app.09.txt?v=1.4.0', './app.10.txt?v=1.4.0', './app.11.txt?v=1.4.0'
 ];
 
 self.addEventListener('install', event => {
