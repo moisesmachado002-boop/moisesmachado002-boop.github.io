@@ -1,0 +1,110 @@
+}
+
+  async function importBackup(event) {
+    const file = event.target.files?.[0]; if (!file) return;
+    try {
+      const parsed = JSON.parse(await file.text());
+      const imported = {
+        ...defaultState(),
+        transactions: Array.isArray(parsed.transactions) ? parsed.transactions : [],
+        cards: Array.isArray(parsed.cards) ? parsed.cards : [],
+        purchases: Array.isArray(parsed.purchases) ? parsed.purchases : [],
+        bills: Array.isArray(parsed.bills) ? parsed.bills : [],
+        billPayments: Array.isArray(parsed.billPayments) ? parsed.billPayments : [],
+        goals: Array.isArray(parsed.goals) ? parsed.goals : [],
+        openingBalances: {
+          account: parseMoney(parsed.openingBalances?.account || 0),
+          cash: parseMoney(parsed.openingBalances?.cash || 0)
+        }
+      };
+      if (!confirm('Importar este backup substituirá os dados atuais. Continuar?')) return;
+      state = imported; saveState(); populateOpeningBalancesForm(); renderAll(); toast('Backup importado com sucesso.');
+    } catch {
+      toast('Não foi possível ler este backup.');
+    } finally {
+      event.target.value = '';
+    }
+  }
+
+  function loadDemoData() {
+    if ((state.transactions.length || state.cards.length || state.bills.length || state.goals.length) && !confirm('Adicionar dados de demonstração aos seus dados atuais?')) return;
+    const month = currentMonth();
+    const d = todayLocal();
+    const cardId = uid('card');
+    state.cards.push({ id: cardId, name: 'Cartão principal', limit: 3000, closingDay: 20, dueDay: 27 });
+    state.transactions.push(
+      { id: uid('tx'), type: 'income', amount: 1620, description: 'Salário', category: 'Salário', paymentMethod: 'Pix', date: `${month}-05`, note: '', source: 'manual' },
+      { id: uid('tx'), type: 'income', amount: 280, description: 'Entregas por app', category: 'Entregas/Apps', paymentMethod: 'Pix', date: d, note: '', source: 'manual' },
+      { id: uid('tx'), type: 'expense', amount: 120, description: 'Combustível', category: 'Combustível', paymentMethod: 'Débito', date: d, note: '', source: 'manual' }
+    );
+    state.purchases.push({ id: uid('purchase'), cardId, description: 'Celular', amount: 1200, installments: 10, date: `${month}-10`, category: 'Compras' });
+    state.bills.push(
+      { id: uid('bill'), description: 'Internet', amount: 99.9, dueDay: 12, category: 'Contas', paymentMethod: 'Pix', active: true },
+      { id: uid('bill'), description: 'Academia', amount: 89.9, dueDay: 15, category: 'Saúde', paymentMethod: 'Débito', active: true }
+    );
+    state.goals.push({ id: uid('goal'), name: 'Comprar um carro', target: 20000, current: 2500, deadline: '' });
+    if (!state.openingBalances) state.openingBalances = { account: 0, cash: 0 };
+    if (!state.openingBalances.account && !state.openingBalances.cash) state.openingBalances = { account: 500, cash: 100 };
+    saveState(); populateOpeningBalancesForm(); renderAll(); toast('Dados de demonstração carregados.');
+  }
+
+  function clearAllData() {
+    if (!confirm('Tem certeza? Todos os lançamentos, cartões, contas e metas serão apagados.')) return;
+    state = defaultState(); saveState(); populateOpeningBalancesForm(); renderAll(); toast('Todos os dados foram apagados.');
+  }
+
+  function applySavedTheme() {
+    const theme = localStorage.getItem(THEME_KEY) || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+    document.documentElement.dataset.theme = theme;
+    $('#themeBtn').textContent = theme === 'dark' ? '☀' : '☾';
+  }
+
+  function toggleTheme() {
+    const next = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
+    document.documentElement.dataset.theme = next;
+    localStorage.setItem(THEME_KEY, next);
+    $('#themeBtn').textContent = next === 'dark' ? '☀' : '☾';
+  }
+
+  function parseMoney(value) {
+    if (typeof value === 'number') return roundMoney(value);
+    let s = String(value ?? '').trim().replace(/\s/g, '').replace(/R\$/gi, '');
+    if (!s) return 0;
+    if (s.includes(',') && s.includes('.')) s = s.replace(/\./g, '').replace(',', '.');
+    else if (s.includes(',')) s = s.replace(',', '.');
+    const n = Number(s.replace(/[^0-9.-]/g, ''));
+    return Number.isFinite(n) ? roundMoney(n) : 0;
+  }
+
+  function money(value) {
+    return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(Number(value) || 0);
+  }
+
+  function roundMoney(v) { return Math.round((Number(v) + Number.EPSILON) * 100) / 100; }
+  function sum(arr, fn) { return arr.reduce((acc, item) => acc + Number(fn(item) || 0), 0); }
+  function addMap(map, key, value) { map.set(key || 'Outros', roundMoney((map.get(key || 'Outros') || 0) + Number(value || 0))); }
+
+  function localDate(dateStr) {
+    const [y, m, d] = dateStr.split('-').map(Number);
+    return new Date(y, m - 1, d, 12, 0, 0);
+  }
+
+  function formatDate(dateStr) {
+    if (!dateStr) return '';
+    return localDate(dateStr).toLocaleDateString('pt-BR');
+  }
+
+  function formatMonth(month) {
+    const [y, m] = month.split('-').map(Number);
+    return new Date(y, m - 1, 1).toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
+  }
+
+  function monthShort(month) {
+    const [y, m] = month.split('-').map(Number);
+    return new Date(y, m - 1, 1).toLocaleDateString('pt-BR', { month: 'short' }).replace('.', '');
+  }
+
+  function addMonths(month, delta) {
+    const [y, m] = month.split('-').map(Number);
+    const d = new Date(y, m - 1 + delta, 1);
+    return `${d.ge
