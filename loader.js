@@ -11,6 +11,7 @@
     if (!window.supabase) await loadScript('https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2');
     const js = await readParts(appParts);
     (0, eval)(js);
+    await loadScript('./category-fix.js');
   } catch (err) {
     document.body.innerHTML = '<div style="font-family:system-ui;padding:24px">Não foi possível carregar o Meu Financeiro. Verifique sua internet e atualize a página.</div>';
     console.error(err);
