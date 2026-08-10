@@ -1,5 +1,49 @@
-const CACHE = 'meu-financeiro-v1-3-4';
-const ASSETS = ["./", "./index.html", "./loader.js", "./manifest.json", "./icon.svg", "./category-fix.js", "./body.01.txt", "./body.02.txt", "./body.03.txt", "./body.04.txt", "./body.05.txt", "./style.01.txt", "./style.02.txt", "./style.03.txt", "./app.01.txt", "./app.02.txt", "./app.03.txt", "./app.04.txt", "./app.05.txt", "./app.06.txt", "./app.07.txt", "./app.08.txt", "./app.09.txt", "./app.10.txt", "./app.11.txt"];
-self.addEventListener('install', e => { e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS))); self.skipWaiting(); });
-self.addEventListener('activate', e => { e.waitUntil(caches.keys().then(keys => Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k))))); self.clients.claim(); });
-self.addEventListener('fetch', e => { if (e.request.method !== 'GET') return; e.respondWith(caches.match(e.request).then(cached => cached || fetch(e.request).then(r => { const cp=r.clone(); caches.open(CACHE).then(c => c.put(e.request,cp)).catch(()=>{}); return r; }).catch(() => caches.match('./index.html')))); });
+const CACHE = 'meu-financeiro-v1-3-5';
+const STATIC_ASSETS = [
+  './manifest.json?v=1.3.5', './icon.svg', './category-fix.js?v=1.3.5',
+  './body.01.txt?v=1.3.5', './body.02.txt?v=1.3.5', './body.03.txt?v=1.3.5', './body.04.txt?v=1.3.5', './body.05.txt?v=1.3.5',
+  './style.01.txt?v=1.3.5', './style.02.txt?v=1.3.5', './style.03.txt?v=1.3.5',
+  './app.01.txt?v=1.3.5', './app.02.txt?v=1.3.5', './app.03.txt?v=1.3.5', './app.04.txt?v=1.3.5', './app.05.txt?v=1.3.5', './app.06.txt?v=1.3.5', './app.07.txt?v=1.3.5', './app.08.txt?v=1.3.5', './app.09.txt?v=1.3.5', './app.10.txt?v=1.3.5', './app.11.txt?v=1.3.5'
+];
+
+self.addEventListener('install', event => {
+  event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(STATIC_ASSETS)));
+  self.skipWaiting();
+});
+
+self.addEventListener('activate', event => {
+  event.waitUntil(caches.keys().then(keys => Promise.all(keys.filter(key => key !== CACHE).map(key => caches.delete(key)))));
+  self.clients.claim();
+});
+
+self.addEventListener('fetch', event => {
+  if (event.request.method !== 'GET') return;
+  const url = new URL(event.request.url);
+  const isSameOrigin = url.origin === self.location.origin;
+  const isNavigation = event.request.mode === 'navigate';
+
+  if (isNavigation) {
+    event.respondWith(
+      fetch(event.request, { cache: 'no-store' })
+        .then(response => {
+          const copy = response.clone();
+          caches.open(CACHE).then(cache => cache.put('./index.html', copy)).catch(() => {});
+          return response;
+        })
+        .catch(() => caches.match('./index.html'))
+    );
+    return;
+  }
+
+  if (isSameOrigin) {
+    event.respondWith(
+      fetch(event.request, { cache: 'no-store' })
+        .then(response => {
+          const copy = response.clone();
+          caches.open(CACHE).then(cache => cache.put(event.request, copy)).catch(() => {});
+          return response;
+        })
+        .catch(() => caches.match(event.request))
+    );
+  }
+});
