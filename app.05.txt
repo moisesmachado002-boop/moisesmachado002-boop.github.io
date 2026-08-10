@@ -1,0 +1,133 @@
+addEventListener('keydown', event => {
+      if (event.key === 'Enter' && event.target.tagName !== 'TEXTAREA') event.preventDefault();
+    }));
+  }
+
+  function bindForms() {
+    els.openingBalancesForm.addEventListener('submit', event => {
+      event.preventDefault();
+      const fd = new FormData(event.currentTarget);
+      state.openingBalances = {
+        account: parseMoney(fd.get('account')),
+        cash: parseMoney(fd.get('cash'))
+      };
+      saveState();
+      renderAll();
+      toast('Saldos iniciais atualizados.');
+    });
+
+    els.transactionForm.addEventListener('submit', event => {
+      event.preventDefault();
+      const fd = new FormData(event.currentTarget);
+      const amount = parseMoney(fd.get('amount'));
+      if (!(amount > 0)) return toast('Informe um valor válido.');
+      state.transactions.push({
+        id: uid('tx'), type: fd.get('type'), amount,
+        description: String(fd.get('description')).trim(), category: fd.get('category'),
+        paymentMethod: fd.get('paymentMethod'),
+        date: fd.get('date'), note: String(fd.get('note') || '').trim(), source: 'manual'
+      });
+      saveState(); event.currentTarget.reset(); setFormDate(event.currentTarget); els.transactionModal.close(); renderAll(); toast('Lançamento salvo.');
+    });
+
+    els.cardForm.addEventListener('submit', event => {
+      event.preventDefault();
+      const fd = new FormData(event.currentTarget);
+      const limit = parseMoney(fd.get('limit'));
+      if (!(limit > 0)) return toast('Informe um limite válido.');
+      state.cards.push({
+        id: uid('card'), name: String(fd.get('name')).trim(), limit,
+        closingDay: Number(fd.get('closingDay')), dueDay: Number(fd.get('dueDay'))
+      });
+      saveState(); event.currentTarget.reset(); els.cardModal.close(); renderAll(); toast('Cartão cadastrado.');
+    });
+
+    els.purchaseForm.addEventListener('submit', event => {
+      event.preventDefault();
+      const fd = new FormData(event.currentTarget);
+      const amount = parseMoney(fd.get('amount'));
+      const installments = Number(fd.get('installments'));
+      if (!(amount > 0) || installments < 1 || installments > 48) return toast('Revise valor e parcelas.');
+      if (!state.cards.some(c => c.id === fd.get('cardId'))) return toast('Selecione um cartão válido.');
+      state.purchases.push({
+        id: uid('purchase'), cardId: fd.get('cardId'), description: String(fd.get('description')).trim(),
+        amount, installments, date: fd.get('date'), category: fd.get('category')
+      });
+      saveState(); event.currentTarget.reset(); event.currentTarget.elements.installments.value = 1; setFormDate(event.currentTarget);
+      els.purchaseModal.close(); renderAll(); toast('Compra parcelada salva.');
+    });
+
+    els.billForm.addEventListener('submit', event => {
+      event.preventDefault();
+      const fd = new FormData(event.currentTarget);
+      const amount = parseMoney(fd.get('amount'));
+      if (!(amount > 0)) return toast('Informe um valor válido.');
+      state.bills.push({
+        id: uid('bill'), description: String(fd.get('description')).trim(), amount,
+        dueDay: Number(fd.get('dueDay')), category: fd.get('category'),
+        paymentMethod: fd.get('paymentMethod'), active: true
+      });
+      saveState(); event.currentTarget.reset(); els.billModal.close(); renderAll(); toast('Conta fixa cadastrada.');
+    });
+
+    els.goalForm.addEventListener('submit', event => {
+      event.preventDefault();
+      const fd = new FormData(event.currentTarget);
+      const target = parseMoney(fd.get('target'));
+      const current = parseMoney(fd.get('current')) || 0;
+      if (!(target > 0)) return toast('Informe um valor de meta válido.');
+      state.goals.push({ id: uid('goal'), name: String(fd.get('name')).trim(), target, current, deadline: fd.get('deadline') || '' });
+      saveState(); event.currentTarget.reset(); els.goalModal.close(); renderAll(); toast('Meta criada.');
+    });
+
+    els.goalContributionForm.addEventListener('submit', event => {
+      event.preventDefault();
+      const fd = new FormData(event.currentTarget);
+      const goal = state.goals.find(g => g.id === fd.get('goalId'));
+      const amount = parseMoney(fd.get('amount'));
+      if (!goal || !(amount > 0)) return toast('Informe um valor válido.');
+      goal.current = roundMoney(goal.current + amount);
+      saveState(); event.currentTarget.reset(); els.goalContributionModal.close(); renderAll(); toast('Valor adicionado à meta.');
+    });
+  }
+
+  function openModal(dialog) {
+    if (!dialog.open) dialog.showModal();
+  }
+
+  function openTransactionModal() {
+    setFormDate(els.transactionForm);
+    openModal(els.transactionModal);
+    setTimeout(() => els.transactionForm.elements.amount.focus(), 50);
+  }
+
+  function openPurchaseModal() {
+    if (!state.cards.length) {
+      toast('Cadastre um cartão primeiro.');
+      openModal(els.cardModal);
+      return;
+    }
+    updateCardSelect();
+    setFormDate(els.purchaseForm);
+    updateInstallmentPreview();
+    openModal(els.purchaseModal);
+  }
+
+  function setFormDate(form) {
+    const dateEl = form.elements.date;
+    if (dateEl && !dateEl.value) dateEl.value = todayLocal();
+  }
+
+  function renderAll() {
+    updateCardSelect();
+    renderDashboard();
+    renderTransactions();
+    renderCards();
+    renderBills();
+    renderGoals();
+    renderReports();
+  }
+
+  function renderDashboard() {
+    const month = els.dashboardMonth.value || currentMonth();
+    const data = 
