@@ -1,5 +1,6 @@
 {
-  "version": "1.5.0",
-  "name": "Meu Financeiro V1.5",
-  "releasedAt": "2026-08-10"
+  "version": "1.5.1",
+  "name": "Meu Financeiro V1.5.1",
+  "releasedAt": "2026-08-10",
+  "notes": "Correção de estabilidade: reduz observadores e atualizações contínuas da V1.5."
 }
