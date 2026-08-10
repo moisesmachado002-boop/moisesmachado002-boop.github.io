@@ -1,0 +1,107 @@
+omo paga.');
+  }
+
+  function unpayBill(billId, month) {
+    const payment = state.billPayments.find(p => p.billId === billId && p.month === month);
+    if (!payment) return;
+    state.transactions = state.transactions.filter(t => t.id !== payment.transactionId);
+    state.billPayments = state.billPayments.filter(p => p.id !== payment.id);
+    saveState(); renderAll(); toast('Pagamento desfeito.');
+  }
+
+  function deleteBill(id) {
+    const bill = state.bills.find(b => b.id === id);
+    if (!bill || !confirm(`Excluir a conta fixa "${bill.description}"? Os pagamentos já lançados serão mantidos.`)) return;
+    state.bills = state.bills.filter(b => b.id !== id);
+    state.billPayments = state.billPayments.filter(p => p.billId !== id);
+    saveState(); renderAll(); toast('Conta fixa excluída.');
+  }
+
+  function renderGoals() {
+    if (!state.goals.length) return setEmpty(els.goalsGrid, 'Nenhuma meta cadastrada.');
+    els.goalsGrid.classList.remove('empty-state');
+    els.goalsGrid.innerHTML = state.goals.map(goal => {
+      const pct = Math.min(100, goal.target > 0 ? goal.current / goal.target * 100 : 0);
+      const remaining = Math.max(0, goal.target - goal.current);
+      return `<article class="goal-card">
+        <h3>${escapeHtml(goal.name)}</h3>
+        <div class="card-meta">${goal.deadline ? `Prazo: ${formatDate(goal.deadline)}` : 'Sem prazo definido'}</div>
+        <div class="progress"><span style="width:${pct.toFixed(1)}%"></span></div>
+        <div class="goal-values"><span>Guardado <strong>${money(goal.current)}</strong></span><span>${pct.toFixed(0)}%</span></div>
+        <div class="goal-values"><span>Meta ${money(goal.target)}</span><span>Falta ${money(remaining)}</span></div>
+        <div class="item-actions"><button class="mini-btn" data-add-goal="${goal.id}">+ Adicionar valor</button><button class="mini-btn danger-text" data-delete-goal="${goal.id}">Excluir</button></div>
+      </article>`;
+    }).join('');
+    $$('[data-add-goal]', els.goalsGrid).forEach(btn => btn.addEventListener('click', () => openGoalContribution(btn.dataset.addGoal)));
+    $$('[data-delete-goal]', els.goalsGrid).forEach(btn => btn.addEventListener('click', () => deleteGoal(btn.dataset.deleteGoal)));
+  }
+
+  function openGoalContribution(id) {
+    els.goalContributionForm.elements.goalId.value = id;
+    openModal(els.goalContributionModal);
+  }
+
+  function deleteGoal(id) {
+    const goal = state.goals.find(g => g.id === id);
+    if (!goal || !confirm(`Excluir a meta "${goal.name}"?`)) return;
+    state.goals = state.goals.filter(g => g.id !== id);
+    saveState(); renderAll(); toast('Meta excluída.');
+  }
+
+  function renderReports() {
+    const month = els.reportMonth.value || currentMonth();
+    const s = monthlySummary(month);
+    const balance = roundMoney(s.income - s.expense);
+    const rate = s.income > 0 ? (balance / s.income) * 100 : 0;
+    els.reportIncome.textContent = money(s.income);
+    els.reportExpense.textContent = money(s.expense);
+    els.reportBalance.textContent = money(balance);
+    els.savingRate.textContent = `${rate.toFixed(1)}%`;
+
+    const cutoff = reportCutoffDate(month);
+    const availability = availabilitySummary(cutoff);
+    els.reportAccountBalance.textContent = money(availability.account);
+    els.reportCashBalance.textContent = money(availability.cash);
+    els.reportAvailableTotal.textContent = money(availability.total);
+    els.reportUnclassifiedBalance.textContent = money(availability.unclassified);
+    els.reportAvailabilityCaption.textContent = `Posição acumulada até ${formatDate(cutoff)}.`;
+
+    renderCategoryBars(els.reportCategoryBars, s.expenseByCategory);
+    renderSixMonthChart(month);
+  }
+
+  function renderCategoryBars(container, map) {
+    const entries = [...map.entries()].sort((a, b) => b[1] - a[1]);
+    if (!entries.length) return setEmpty(container, 'Nenhuma despesa neste período.');
+    const max = Math.max(...entries.map(([, v]) => v), 1);
+    container.classList.remove('empty-state');
+    container.innerHTML = entries.map(([cat, value]) => `<div class="bar-row">
+      <div class="bar-top"><strong>${escapeHtml(cat)}</strong><span>${money(value)}</span></div>
+      <div class="bar-track"><div class="bar-fill" style="width:${(value / max * 100).toFixed(1)}%"></div></div>
+    </div>`).join('');
+  }
+
+  function renderSixMonthChart(baseMonth) {
+    const months = [];
+    for (let i = 5; i >= 0; i--) months.push(addMonths(baseMonth, -i));
+    const values = months.map(m => ({ month: m, ...monthlySummary(m) }));
+    const max = Math.max(1, ...values.flatMap(v => [v.income, v.expense]));
+    els.sixMonthChart.classList.remove('empty-state');
+    els.sixMonthChart.innerHTML = values.map(v => `<div class="month-col" title="${formatMonth(v.month)}: receitas ${money(v.income)}, despesas ${money(v.expense)}">
+      <div class="month-bars">
+        <span style="height:${Math.max(3, v.income / max * 100)}%"></span>
+        <span class="expense-bar" style="height:${Math.max(3, v.expense / max * 100)}%"></span>
+      </div>
+      <div class="month-label">${monthShort(v.month)}</div>
+    </div>`).join('');
+  }
+
+  function populateOpeningBalancesForm() {
+    if (!els.openingBalancesForm) return;
+    const balances = state.openingBalances || { account: 0, cash: 0 };
+    els.openingBalancesForm.elements.account.value = formatMoneyInput(balances.account);
+    els.openingBalancesForm.elements.cash.value = formatMoneyInput(balances.cash);
+  }
+
+  function paymentLocation(method) {
+    
