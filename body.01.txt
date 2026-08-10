@@ -1,0 +1,112 @@
+<section id="authGate" class="auth-gate" aria-live="polite">
+    <div class="auth-card">
+      <div class="auth-logo">R$</div>
+      <p class="eyebrow">MEU FINANCEIRO</p>
+      <h1>Entre para sincronizar</h1>
+      <p class="auth-subtitle">Use o mesmo e-mail e senha no celular e no notebook. Seus dados ficam salvos na nuvem e uma cópia permanece neste aparelho.</p>
+      <form id="authForm" class="auth-form" autocomplete="on">
+        <label class="field"><span>E-mail</span><input type="email" name="email" autocomplete="email" placeholder="seuemail@exemplo.com" required /></label>
+        <label class="field"><span>Senha</span><input type="password" name="password" autocomplete="current-password" minlength="6" placeholder="Mínimo de 6 caracteres" required /></label>
+        <button type="submit" class="primary auth-primary" id="signInBtn">Entrar</button>
+        <button type="button" class="secondary auth-primary" id="signUpBtn">Criar minha conta</button>
+      </form>
+      <div id="authMessage" class="auth-message">Conectando ao banco de dados...</div>
+      <p class="auth-security">🔒 Cada login acessa somente os próprios dados.</p>
+    </div>
+  </section>
+
+  <div class="app-shell auth-hidden" id="appShell">
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">CONTROLE FINANCEIRO</p>
+        <h1>Meu Financeiro</h1>
+      </div>
+      <div class="top-actions">
+        <div class="sync-pill" id="syncStatus" title="Status da sincronização"><span class="sync-dot"></span><span id="syncStatusText">Nuvem</span></div>
+        <button class="text-btn logout-top" id="logoutBtn" type="button">Sair</button>
+        <button class="icon-btn" id="themeBtn" aria-label="Alternar tema" title="Alternar tema">☾</button>
+      </div>
+    </header>
+
+    <main>
+      <section class="view active" id="view-dashboard" data-view="dashboard">
+        <div class="toolbar">
+          <label class="field compact">
+            <span>Mês</span>
+            <input type="month" id="dashboardMonth" />
+          </label>
+          <div class="segmented" aria-label="Período do dashboard">
+            <button class="active" data-period="month">Mês</button>
+            <button data-period="week">7 dias</button>
+          </div>
+        </div>
+
+        <div class="hero-card">
+          <div>
+            <span>Saldo do período</span>
+            <strong id="balanceValue">R$ 0,00</strong>
+            <small id="balanceCaption">Receitas menos despesas</small>
+          </div>
+          <div class="hero-indicator" id="heroIndicator">↗</div>
+        </div>
+
+        <div class="stats-grid">
+          <article class="stat-card positive">
+            <span>Receitas</span>
+            <strong id="incomeValue">R$ 0,00</strong>
+            <small id="incomeCount">0 lançamentos</small>
+          </article>
+          <article class="stat-card negative">
+            <span>Despesas</span>
+            <strong id="expenseValue">R$ 0,00</strong>
+            <small id="expenseCount">0 lançamentos</small>
+          </article>
+          <article class="stat-card">
+            <span>Faturas</span>
+            <strong id="invoiceValue">R$ 0,00</strong>
+            <small id="invoiceCaption">No período</small>
+          </article>
+          <article class="stat-card warning">
+            <span>Contas pendentes</span>
+            <strong id="pendingBillsValue">R$ 0,00</strong>
+            <small id="pendingBillsCount">0 contas</small>
+          </article>
+        </div>
+
+        <section class="panel">
+          <div class="panel-head">
+            <div>
+              <p class="eyebrow">DISPONIBILIDADE ATUAL</p>
+              <h2>Onde está seu dinheiro?</h2>
+              <p class="panel-subtitle" id="availabilityCaption">Saldo inicial + movimentações classificadas até hoje.</p>
+            </div>
+            <button class="text-btn" data-nav="settings">Ajustar saldos</button>
+          </div>
+          <div class="stats-grid availability-grid">
+            <article class="stat-card"><span>Dinheiro em conta</span><strong id="accountBalanceValue">R$ 0,00</strong><small>Pix, débito, transferência e boleto</small></article>
+            <article class="stat-card"><span>Dinheiro em mãos</span><strong id="cashBalanceValue">R$ 0,00</strong><small>Movimentações em dinheiro</small></article>
+            <article class="stat-card positive"><span>Total disponível</span><strong id="availableTotalValue">R$ 0,00</strong><small>Conta + dinheiro em mãos</small></article>
+            <article class="stat-card warning"><span>Sem classificação</span><strong id="unclassifiedBalanceValue">R$ 0,00</strong><small>Método “Outro” ou não informado</small></article>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <div>
+              <p class="eyebrow">VISÃO RÁPIDA</p>
+              <h2>Para onde foi o dinheiro?</h2>
+            </div>
+            <button class="text-btn" data-nav="reports">Ver relatório</button>
+          </div>
+          <div id="categoryBars" class="category-bars empty-state">Nenhuma despesa neste período.</div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <div>
+              <p class="eyebrow">ÚLTIMOS REGISTROS</p>
+              <h2>Movimentações</h2>
+            </div>
+            <button class="primary small" id="quickAddBtn">+ Lançar</button>
+          </div>
+          <div id="recentTransactions" class="list empty-state">Nenhum l
