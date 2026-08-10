@@ -1,0 +1,89 @@
+rd.limit)} · fecha dia ${card.closingDay}</div>
+          <div class="item-actions"><button class="mini-btn danger-text" data-delete-card="${card.id}">Excluir cartão</button></div>
+        </article>`;
+      }).join('');
+      $$('[data-delete-card]', els.cardsGrid).forEach(btn => btn.addEventListener('click', () => deleteCard(btn.dataset.deleteCard)));
+    }
+
+    const installments = getInvoiceInstallments(month).sort((a, b) => a.cardName.localeCompare(b.cardName));
+    if (!installments.length) return setEmpty(els.invoicePurchases, 'Nenhuma compra nesta fatura.');
+    els.invoicePurchases.classList.remove('empty-state');
+    els.invoicePurchases.innerHTML = installments.map(it => `<article class="list-item">
+      <div class="item-main">
+        <div class="item-title"><span>${escapeHtml(it.description)}</span><span class="badge">${it.installmentIndex + 1}/${it.installments}</span></div>
+        <div class="item-meta">${escapeHtml(it.cardName)} · ${escapeHtml(it.category)} · compra em ${formatDate(it.purchaseDate)}</div>
+        <div class="item-actions"><button class="mini-btn danger-text" data-delete-purchase="${it.purchaseId}">Excluir compra inteira</button></div>
+      </div>
+      <div class="amount expense">${money(it.amount)}</div>
+    </article>`).join('');
+    $$('[data-delete-purchase]', els.invoicePurchases).forEach(btn => btn.addEventListener('click', () => deletePurchase(btn.dataset.deletePurchase)));
+  }
+
+  function deleteCard(id) {
+    const card = state.cards.find(c => c.id === id);
+    if (!card) return;
+    const purchaseCount = state.purchases.filter(p => p.cardId === id).length;
+    const msg = purchaseCount ? `Excluir o cartão "${card.name}" e também ${plural(purchaseCount, 'compra')} vinculada?` : `Excluir o cartão "${card.name}"?`;
+    if (!confirm(msg)) return;
+    state.cards = state.cards.filter(c => c.id !== id);
+    state.purchases = state.purchases.filter(p => p.cardId !== id);
+    saveState(); renderAll(); toast('Cartão excluído.');
+  }
+
+  function deletePurchase(id) {
+    const p = state.purchases.find(x => x.id === id);
+    if (!p || !confirm(`Excluir a compra "${p.description}" e todas as parcelas?`)) return;
+    state.purchases = state.purchases.filter(x => x.id !== id);
+    saveState(); renderAll(); toast('Compra excluída.');
+  }
+
+  function updateInstallmentPreview() {
+    const form = els.purchaseForm;
+    const amount = parseMoney(form.elements.amount.value);
+    const installments = Math.max(1, Number(form.elements.installments.value) || 1);
+    const card = state.cards.find(c => c.id === form.elements.cardId.value);
+    if (!(amount > 0)) {
+      els.installmentPreview.textContent = 'Informe o valor para visualizar as parcelas.';
+      return;
+    }
+    const parts = installmentAmounts(amount, installments);
+    const firstMonth = card && form.elements.date.value ? firstInvoiceMonth(form.elements.date.value, card.closingDay) : null;
+    els.installmentPreview.textContent = `${installments}x de aproximadamente ${money(parts[0])}${firstMonth ? ` · primeira fatura: ${formatMonth(firstMonth)}` : ''}.`;
+  }
+
+  function renderBills() {
+    const month = els.billsMonth.value || currentMonth();
+    const items = state.bills.filter(b => b.active !== false).sort((a, b) => a.dueDay - b.dueDay);
+    if (!items.length) return setEmpty(els.billsList, 'Nenhuma conta fixa cadastrada.');
+    els.billsList.classList.remove('empty-state');
+    els.billsList.innerHTML = items.map(bill => {
+      const paid = isBillPaid(bill.id, month);
+      return `<article class="list-item">
+        <div class="item-main">
+          <div class="item-title"><span>${escapeHtml(bill.description)}</span><span class="badge">${paid ? 'Paga' : 'Pendente'}</span></div>
+          <div class="item-meta">${escapeHtml(bill.category)}${bill.paymentMethod ? ` · ${escapeHtml(bill.paymentMethod)}` : ''} · vence dia ${bill.dueDay} · ${formatMonth(month)}</div>
+          <div class="item-actions">
+            ${paid ? `<button class="mini-btn" data-unpay-bill="${bill.id}">Desfazer pagamento</button>` : `<button class="mini-btn" data-pay-bill="${bill.id}">Marcar como paga</button>`}
+            <button class="mini-btn danger-text" data-delete-bill="${bill.id}">Excluir</button>
+          </div>
+        </div>
+        <div class="amount ${paid ? '' : 'expense'}">${money(bill.amount)}</div>
+      </article>`;
+    }).join('');
+    $$('[data-pay-bill]', els.billsList).forEach(btn => btn.addEventListener('click', () => payBill(btn.dataset.payBill, month)));
+    $$('[data-unpay-bill]', els.billsList).forEach(btn => btn.addEventListener('click', () => unpayBill(btn.dataset.unpayBill, month)));
+    $$('[data-delete-bill]', els.billsList).forEach(btn => btn.addEventListener('click', () => deleteBill(btn.dataset.deleteBill)));
+  }
+
+  function payBill(billId, month) {
+    const bill = state.bills.find(b => b.id === billId);
+    if (!bill || isBillPaid(billId, month)) return;
+    const maxDay = daysInMonth(month);
+    const day = String(Math.min(bill.dueDay, maxDay)).padStart(2, '0');
+    const transactionId = uid('tx');
+    state.transactions.push({
+      id: transactionId, type: 'expense', amount: bill.amount, description: bill.description,
+      category: bill.category, paymentMethod: bill.paymentMethod || '', date: `${month}-${day}`, note: 'Pagamento de conta fixa', source: 'bill'
+    });
+    state.billPayments.push({ id: uid('pay'), billId, month, transactionId });
+    saveState(); renderAll(); toast('Conta marcada c
