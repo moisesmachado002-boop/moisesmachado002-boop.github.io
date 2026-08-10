@@ -1,0 +1,29 @@
+tFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+  }
+
+  function monthDiff(from, to) {
+    const [fy, fm] = from.split('-').map(Number); const [ty, tm] = to.split('-').map(Number);
+    return (ty - fy) * 12 + (tm - fm);
+  }
+
+  function daysInMonth(month) {
+    const [y, m] = month.split('-').map(Number);
+    return new Date(y, m, 0).getDate();
+  }
+
+  function plural(n, word) { return `${n} ${word}${n === 1 ? '' : 's'}`; }
+
+  function setEmpty(el, text) {
+    el.classList.add('empty-state'); el.textContent = text;
+  }
+
+  function escapeHtml(value) {
+    return String(value ?? '').replace(/[&<>'"]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[ch]));
+  }
+
+  let toastTimer;
+  function toast(message) {
+    clearTimeout(toastTimer); els.toast.textContent = message; els.toast.classList.add('show');
+    toastTimer = setTimeout(() => els.toast.classList.remove('show'), 2200);
+  }
+})();
