@@ -1,0 +1,127 @@
+id)
+        .maybeSingle();
+      if (error) throw error;
+      const remote = data?.data ? normalizeState(data.data) : null;
+      if (cloudDirty || (remote && stateTimestamp(state) > stateTimestamp(remote))) {
+        await pushCloudState(true);
+      } else if (remote && stateTimestamp(remote) > stateTimestamp(state)) {
+        applyRemoteState(remote);
+      } else if (!remote) {
+        cloudDirty = true;
+        await pushCloudState(true);
+      } else {
+        setSyncStatus('Sincronizado', 'synced');
+      }
+      if (showToast) toast('Sincronização concluída.');
+    } catch (error) {
+      console.error('Erro na sincronização:', error);
+      setSyncStatus('Erro ao sincronizar', 'error');
+      if (showToast) toast('Não foi possível sincronizar agora.');
+    }
+  }
+
+  function applyRemoteState(remote) {
+    const normalized = normalizeState(remote);
+    if (stateTimestamp(normalized) && stateTimestamp(normalized) < stateTimestamp(state) && cloudDirty) return;
+    state = normalized;
+    cloudDirty = false;
+    persistLocalState();
+    populateOpeningBalancesForm();
+    renderAll();
+    setSyncStatus('Sincronizado', 'synced');
+  }
+
+  function subscribeRealtime() {
+    if (!currentUser || !supabaseClient) return;
+    if (realtimeChannel) supabaseClient.removeChannel(realtimeChannel);
+    realtimeChannel = supabaseClient
+      .channel(`finance-state-${currentUser.id}`)
+      .on('postgres_changes', {
+        event: '*', schema: 'public', table: 'finance_state', filter: `user_id=eq.${currentUser.id}`
+      }, payload => {
+        if ((payload.eventType === 'INSERT' || payload.eventType === 'UPDATE') && payload.new?.data) {
+          const remote = normalizeState(payload.new.data);
+          if (stateTimestamp(remote) > stateTimestamp(state)) applyRemoteState(remote);
+          else setSyncStatus('Sincronizado', 'synced');
+        }
+      })
+      .subscribe(status => {
+        if (status === 'SUBSCRIBED' && !cloudDirty) setSyncStatus('Sincronizado', 'synced');
+      });
+  }
+
+  function todayLocal() {
+    const d = new Date();
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  }
+
+  function currentMonth() {
+    return todayLocal().slice(0, 7);
+  }
+
+  function setDefaultDates() {
+    const month = currentMonth();
+    [els.dashboardMonth, els.transactionMonthFilter, els.invoiceMonth, els.billsMonth, els.reportMonth].forEach(el => {
+      if (el && !el.value) el.value = month;
+    });
+    $$('input[type="date"]', document).forEach(el => { if (!el.value) el.value = todayLocal(); });
+  }
+
+  function populateCategories() {
+    ['#transactionCategory', '#purchaseCategory', '#billCategory'].forEach(id => {
+      const select = $(id);
+      select.innerHTML = categories.map(c => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join('');
+    });
+  }
+
+  function bindNavigation() {
+    $$('[data-nav]').forEach(btn => btn.addEventListener('click', () => navigate(btn.dataset.nav)));
+    $$('.segmented [data-period]').forEach(btn => btn.addEventListener('click', () => {
+      dashboardPeriod = btn.dataset.period;
+      $$('.segmented [data-period]').forEach(b => b.classList.toggle('active', b === btn));
+      renderDashboard();
+    }));
+  }
+
+  function navigate(view) {
+    $$('.view').forEach(v => v.classList.toggle('active', v.dataset.view === view));
+    $$('.bottom-nav [data-nav]').forEach(b => b.classList.toggle('active', b.dataset.nav === view));
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+    if (view === 'cards') renderCards();
+    if (view === 'bills') renderBills();
+    if (view === 'goals') renderGoals();
+    if (view === 'reports') renderReports();
+  }
+
+  function bindActions() {
+    $('#quickAddBtn').addEventListener('click', openTransactionModal);
+    $('#addTransactionBtn').addEventListener('click', openTransactionModal);
+    $('#addCardBtn').addEventListener('click', () => openModal(els.cardModal));
+    $('#addPurchaseBtn').addEventListener('click', openPurchaseModal);
+    $('#addBillBtn').addEventListener('click', () => openModal(els.billModal));
+    $('#addGoalBtn').addEventListener('click', () => openModal(els.goalModal));
+
+    $$('.close-modal').forEach(btn => btn.addEventListener('click', () => btn.closest('dialog').close()));
+
+    [els.dashboardMonth, els.transactionMonthFilter, els.invoiceMonth, els.billsMonth, els.reportMonth].forEach(el => {
+      el.addEventListener('change', renderAll);
+    });
+    els.transactionSearch.addEventListener('input', renderTransactions);
+    els.transactionTypeFilter.addEventListener('change', renderTransactions);
+
+    $('#themeBtn').addEventListener('click', toggleTheme);
+    $('#exportBackupBtn').addEventListener('click', exportBackup);
+    $('#importBackupInput').addEventListener('change', importBackup);
+    $('#demoDataBtn').addEventListener('click', loadDemoData);
+    $('#clearDataBtn').addEventListener('click', clearAllData);
+
+    els.purchaseForm.elements.amount.addEventListener('input', updateInstallmentPreview);
+    els.purchaseForm.elements.installments.addEventListener('input', updateInstallmentPreview);
+    els.purchaseForm.elements.date.addEventListener('change', updateInstallmentPreview);
+    els.purchaseForm.elements.cardId.addEventListener('change', updateInstallmentPreview);
+
+    // Evita o problema clássico de apertar Enter e salvar antes de revisar.
+    $$('dialog form').forEach(form => form.
