@@ -1,0 +1,134 @@
+ançamento ainda.</div>
+        </section>
+      </section>
+
+      <section class="view" id="view-transactions" data-view="transactions">
+        <div class="section-title">
+          <div>
+            <p class="eyebrow">MOVIMENTAÇÕES</p>
+            <h2>Lançamentos</h2>
+          </div>
+          <button class="primary" id="addTransactionBtn">+ Novo</button>
+        </div>
+
+        <div class="filter-row">
+          <input type="search" id="transactionSearch" placeholder="Buscar descrição..." />
+          <select id="transactionTypeFilter">
+            <option value="all">Todos</option>
+            <option value="income">Receitas</option>
+            <option value="expense">Despesas</option>
+          </select>
+          <input type="month" id="transactionMonthFilter" />
+        </div>
+        <div id="transactionsList" class="list empty-state">Nenhum lançamento cadastrado.</div>
+      </section>
+
+      <section class="view" id="view-cards" data-view="cards">
+        <div class="section-title">
+          <div>
+            <p class="eyebrow">CRÉDITO</p>
+            <h2>Cartões e faturas</h2>
+          </div>
+          <div class="action-pair">
+            <button class="secondary" id="addCardBtn">+ Cartão</button>
+            <button class="primary" id="addPurchaseBtn">+ Compra</button>
+          </div>
+        </div>
+
+        <div class="toolbar">
+          <label class="field compact">
+            <span>Fatura de</span>
+            <input type="month" id="invoiceMonth" />
+          </label>
+        </div>
+        <div id="cardsGrid" class="cards-grid empty-state">Cadastre seu primeiro cartão.</div>
+        <section class="panel">
+          <div class="panel-head">
+            <div>
+              <p class="eyebrow">DETALHAMENTO</p>
+              <h2>Compras da fatura</h2>
+            </div>
+          </div>
+          <div id="invoicePurchases" class="list empty-state">Nenhuma compra nesta fatura.</div>
+        </section>
+      </section>
+
+      <section class="view" id="view-bills" data-view="bills">
+        <div class="section-title">
+          <div>
+            <p class="eyebrow">RECORRÊNCIAS</p>
+            <h2>Contas fixas</h2>
+          </div>
+          <button class="primary" id="addBillBtn">+ Nova conta</button>
+        </div>
+        <div class="toolbar">
+          <label class="field compact">
+            <span>Mês</span>
+            <input type="month" id="billsMonth" />
+          </label>
+        </div>
+        <div id="billsList" class="list empty-state">Nenhuma conta fixa cadastrada.</div>
+      </section>
+
+      <section class="view" id="view-goals" data-view="goals">
+        <div class="section-title">
+          <div>
+            <p class="eyebrow">OBJETIVOS</p>
+            <h2>Metas</h2>
+          </div>
+          <button class="primary" id="addGoalBtn">+ Nova meta</button>
+        </div>
+        <div id="goalsGrid" class="goals-grid empty-state">Nenhuma meta cadastrada.</div>
+      </section>
+
+      <section class="view" id="view-reports" data-view="reports">
+        <div class="section-title">
+          <div>
+            <p class="eyebrow">ANÁLISE</p>
+            <h2>Relatórios</h2>
+          </div>
+        </div>
+        <div class="toolbar">
+          <label class="field compact">
+            <span>Mês</span>
+            <input type="month" id="reportMonth" />
+          </label>
+        </div>
+        <div class="stats-grid">
+          <article class="stat-card positive"><span>Receitas</span><strong id="reportIncome">R$ 0,00</strong></article>
+          <article class="stat-card negative"><span>Despesas</span><strong id="reportExpense">R$ 0,00</strong></article>
+          <article class="stat-card"><span>Saldo</span><strong id="reportBalance">R$ 0,00</strong></article>
+          <article class="stat-card"><span>Taxa de economia</span><strong id="savingRate">0%</strong></article>
+        </div>
+        <section class="panel">
+          <div class="panel-head">
+            <div>
+              <h2>Dinheiro em conta ou em mãos</h2>
+              <p class="panel-subtitle" id="reportAvailabilityCaption">Posição acumulada até o período selecionado.</p>
+            </div>
+          </div>
+          <div class="stats-grid availability-grid">
+            <article class="stat-card"><span>Em conta</span><strong id="reportAccountBalance">R$ 0,00</strong></article>
+            <article class="stat-card"><span>Em mãos</span><strong id="reportCashBalance">R$ 0,00</strong></article>
+            <article class="stat-card positive"><span>Total disponível</span><strong id="reportAvailableTotal">R$ 0,00</strong></article>
+            <article class="stat-card warning"><span>Sem classificação</span><strong id="reportUnclassifiedBalance">R$ 0,00</strong></article>
+          </div>
+        </section>
+        <section class="panel">
+          <div class="panel-head"><h2>Despesas por categoria</h2></div>
+          <div id="reportCategoryBars" class="category-bars empty-state">Sem dados para este mês.</div>
+        </section>
+        <section class="panel">
+          <div class="panel-head"><h2>Resumo dos últimos 6 meses</h2></div>
+          <div id="sixMonthChart" class="month-chart empty-state">Sem histórico suficiente.</div>
+        </section>
+      </section>
+
+      <section class="view" id="view-settings" data-view="settings">
+        <div class="section-title">
+          <div>
+            <p class="eyebrow">APP</p>
+            <h2>Configurações</h2>
+          </div>
+        </div>
+        <section 
