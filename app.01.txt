@@ -1,0 +1,155 @@
+(() => {
+  'use strict';
+
+  const LEGACY_STORAGE_KEY = 'meu_financeiro_v1';
+  const USER_STORAGE_PREFIX = 'meu_financeiro_cloud_';
+  const THEME_KEY = 'meu_financeiro_theme';
+  const SUPABASE_URL = 'https://pqcltcegwmyuzytivakt.supabase.co';
+  const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_3B61vWHjC_Qu3ksO0GJVXA_d_ytJyop';
+  const supabaseClient = window.supabase?.createClient
+    ? window.supabase.createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
+        auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true }
+      })
+    : null;
+
+  const categories = [
+    'Alimentação', 'Casa', 'Combustível', 'Transporte', 'Moto/Carro', 'Saúde',
+    'Educação', 'Lazer', 'Assinaturas', 'Compras', 'Contas', 'Salário',
+    'Entregas/Apps', 'Renda extra', 'Investimentos', 'Outros'
+  ];
+
+  const defaultState = () => ({
+    version: 1.3,
+    _meta: { updatedAt: null },
+    transactions: [],
+    cards: [],
+    purchases: [],
+    bills: [],
+    billPayments: [],
+    goals: [],
+    openingBalances: { account: 0, cash: 0 }
+  });
+
+  let state = defaultState();
+  let dashboardPeriod = 'month';
+  let currentUser = null;
+  let activeStorageKey = null;
+  let realtimeChannel = null;
+  let cloudSaveTimer = null;
+  let cloudSaveInFlight = false;
+  let cloudSaveQueued = false;
+  let cloudDirty = false;
+  let authReady = false;
+
+  const $ = (sel, root = document) => root.querySelector(sel);
+  const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
+
+  const els = {
+    dashboardMonth: $('#dashboardMonth'),
+    balanceValue: $('#balanceValue'),
+    balanceCaption: $('#balanceCaption'),
+    incomeValue: $('#incomeValue'),
+    expenseValue: $('#expenseValue'),
+    invoiceValue: $('#invoiceValue'),
+    pendingBillsValue: $('#pendingBillsValue'),
+    pendingBillsCount: $('#pendingBillsCount'),
+    incomeCount: $('#incomeCount'),
+    expenseCount: $('#expenseCount'),
+    accountBalanceValue: $('#accountBalanceValue'),
+    cashBalanceValue: $('#cashBalanceValue'),
+    availableTotalValue: $('#availableTotalValue'),
+    unclassifiedBalanceValue: $('#unclassifiedBalanceValue'),
+    availabilityCaption: $('#availabilityCaption'),
+    categoryBars: $('#categoryBars'),
+    recentTransactions: $('#recentTransactions'),
+    heroIndicator: $('#heroIndicator'),
+    transactionSearch: $('#transactionSearch'),
+    transactionTypeFilter: $('#transactionTypeFilter'),
+    transactionMonthFilter: $('#transactionMonthFilter'),
+    transactionsList: $('#transactionsList'),
+    invoiceMonth: $('#invoiceMonth'),
+    cardsGrid: $('#cardsGrid'),
+    invoicePurchases: $('#invoicePurchases'),
+    billsMonth: $('#billsMonth'),
+    billsList: $('#billsList'),
+    goalsGrid: $('#goalsGrid'),
+    reportMonth: $('#reportMonth'),
+    reportIncome: $('#reportIncome'),
+    reportExpense: $('#reportExpense'),
+    reportBalance: $('#reportBalance'),
+    savingRate: $('#savingRate'),
+    reportAccountBalance: $('#reportAccountBalance'),
+    reportCashBalance: $('#reportCashBalance'),
+    reportAvailableTotal: $('#reportAvailableTotal'),
+    reportUnclassifiedBalance: $('#reportUnclassifiedBalance'),
+    reportAvailabilityCaption: $('#reportAvailabilityCaption'),
+    reportCategoryBars: $('#reportCategoryBars'),
+    sixMonthChart: $('#sixMonthChart'),
+    toast: $('#toast'),
+    transactionModal: $('#transactionModal'),
+    cardModal: $('#cardModal'),
+    purchaseModal: $('#purchaseModal'),
+    billModal: $('#billModal'),
+    goalModal: $('#goalModal'),
+    goalContributionModal: $('#goalContributionModal'),
+    transactionForm: $('#transactionForm'),
+    cardForm: $('#cardForm'),
+    purchaseForm: $('#purchaseForm'),
+    billForm: $('#billForm'),
+    goalForm: $('#goalForm'),
+    goalContributionForm: $('#goalContributionForm'),
+    openingBalancesForm: $('#openingBalancesForm'),
+    purchaseCardSelect: $('#purchaseCardSelect'),
+    installmentPreview: $('#installmentPreview'),
+    appShell: $('#appShell'),
+    authGate: $('#authGate'),
+    authForm: $('#authForm'),
+    authMessage: $('#authMessage'),
+    signUpBtn: $('#signUpBtn'),
+    syncStatus: $('#syncStatus'),
+    syncStatusText: $('#syncStatusText'),
+    cloudUserEmail: $('#cloudUserEmail'),
+    cloudStatusDetail: $('#cloudStatusDetail'),
+    syncNowBtn: $('#syncNowBtn')
+  };
+
+  init();
+
+  function init() {
+    setDefaultDates();
+    populateCategories();
+    bindNavigation();
+    bindForms();
+    bindActions();
+    bindAuth();
+    applySavedTheme();
+    renderAll();
+
+    if ('serviceWorker' in navigator && location.protocol !== 'file:') {
+      navigator.serviceWorker.register('./sw.js').catch(() => {});
+    }
+
+    if (!supabaseClient) {
+      setAuthMessage('Não foi possível carregar a conexão com a nuvem. Verifique sua internet e recarregue o app.', 'error');
+      return;
+    }
+    initAuthSession();
+  }
+
+  function uid(prefix = 'id') {
+    return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+  }
+
+  function normalizeState(raw) {
+    const base = defaultState();
+    const source = raw && typeof raw === 'object' ? raw : {};
+    return {
+      ...base,
+      ...source,
+      version: 1.3,
+      _meta: { ...base._meta, ...(source._meta || {}) },
+      transactions: Array.isArray(source.transactions) ? source.transactions : [],
+      cards: Array.isArray(source.cards) ? source.cards : [],
+      purchases: Array.isArray(source.purchases) ? source.purchases : [],
+      bills: Array.isArray(source.bills) ? source.bills : [],
+      billPa
