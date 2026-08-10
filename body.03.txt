@@ -1,0 +1,91 @@
+class="panel cloud-panel">
+          <div class="panel-head">
+            <div>
+              <p class="eyebrow">NUVEM</p>
+              <h3>Sincronização</h3>
+              <p class="panel-subtitle">Celular e notebook usam o mesmo banco de dados quando você entra com a mesma conta.</p>
+            </div>
+          </div>
+          <div class="cloud-account-row">
+            <div><span class="cloud-label">Conta conectada</span><strong id="cloudUserEmail">—</strong></div>
+            <div><span class="cloud-label">Status</span><strong id="cloudStatusDetail">Aguardando...</strong></div>
+          </div>
+          <div class="action-pair wrap cloud-actions">
+            <button class="secondary" id="syncNowBtn" type="button">Sincronizar agora</button>
+            <button class="secondary" id="logoutSettingsBtn" type="button">Sair da conta</button>
+          </div>
+          <div class="info-box">Se você limpar os dados deste navegador, basta entrar novamente: o app baixa sua cópia da nuvem. O backup JSON continua disponível como segurança extra.</div>
+        </section>
+        <section class="panel">
+          <div class="panel-head">
+            <div>
+              <h3>Saldos iniciais</h3>
+              <p class="panel-subtitle">Informe quanto você tinha em cada lugar antes dos lançamentos registrados no app. Depois disso, o saldo é atualizado automaticamente.</p>
+            </div>
+          </div>
+          <form id="openingBalancesForm" class="balance-settings-form" autocomplete="off">
+            <label class="field"><span>Dinheiro em conta</span><input name="account" inputmode="decimal" placeholder="0,00" /></label>
+            <label class="field"><span>Dinheiro em mãos</span><input name="cash" inputmode="decimal" placeholder="0,00" /></label>
+            <button type="submit" class="primary">Salvar saldos</button>
+          </form>
+          <div class="info-box">Dinheiro = “em mãos”. Pix, Débito, Transferência e Boleto = “em conta”. “Outro” fica como não classificado para você revisar.</div>
+        </section>
+        <section class="panel settings-panel">
+          <div>
+            <h3>Backup dos dados</h3>
+            <p>Exporte tudo em JSON ou importe um backup anteriormente salvo.</p>
+          </div>
+          <div class="action-pair wrap">
+            <button class="secondary" id="exportBackupBtn">Exportar backup</button>
+            <label class="secondary file-label">Importar backup<input type="file" id="importBackupInput" accept="application/json,.json" /></label>
+          </div>
+        </section>
+        <section class="panel settings-panel">
+          <div>
+            <h3>Dados de demonstração</h3>
+            <p>Preenche o app com alguns exemplos para você testar todos os recursos.</p>
+          </div>
+          <button class="secondary" id="demoDataBtn">Carregar demonstração</button>
+        </section>
+        <section class="panel settings-panel danger-zone">
+          <div>
+            <h3>Apagar tudo</h3>
+            <p>Remove os dados desta conta do app e sincroniza a exclusão com a nuvem.</p>
+          </div>
+          <button class="danger" id="clearDataBtn">Apagar dados</button>
+        </section>
+      </section>
+    </main>
+
+    <nav class="bottom-nav" aria-label="Navegação principal">
+      <button class="active" data-nav="dashboard"><span>⌂</span><small>Início</small></button>
+      <button data-nav="transactions"><span>↕</span><small>Lançar</small></button>
+      <button data-nav="cards"><span>▣</span><small>Cartões</small></button>
+      <button data-nav="bills"><span>✓</span><small>Contas</small></button>
+      <button data-nav="goals"><span>◎</span><small>Metas</small></button>
+      <button data-nav="reports"><span>▤</span><small>Relatórios</small></button>
+      <button data-nav="settings"><span>⚙</span><small>Ajustes</small></button>
+    </nav>
+  </div>
+
+  <dialog id="transactionModal" class="modal">
+    <form id="transactionForm" method="dialog" autocomplete="off">
+      <div class="modal-head"><h2>Novo lançamento</h2><button type="button" class="icon-btn close-modal">×</button></div>
+      <div class="form-grid">
+        <label class="field"><span>Tipo</span><select name="type" required><option value="expense">Despesa</option><option value="income">Receita</option></select></label>
+        <label class="field"><span>Valor</span><input name="amount" inputmode="decimal" placeholder="0,00" required /></label>
+        <label class="field full"><span>Descrição</span><input name="description" maxlength="80" placeholder="Ex.: Mercado, salário, combustível" required /></label>
+        <label class="field"><span>Categoria</span><select name="category" id="transactionCategory" required></select></label>
+        <label class="field"><span>Método de pagamento</span><select name="paymentMethod" required>
+          <option value="">Selecione...</option>
+          <option value="Dinheiro">Dinheiro</option>
+          <option value="Pix">Pix</option>
+          <option value="Débito">Débito</option>
+          <option value="Transferência">Transferência</option>
+          <option value="Boleto">Boleto</option>
+          <option value="Outro">Outro</option>
+        </select></label>
+        <label class="field"><span>Data</span><input type="date" name="date" required /></label>
+        <label class="field full"><span>Observação (opcional)</span><textarea name="note" rows="2" maxlength="160"></textarea></label>
+      </div>
+      <p class="form-hint">O Enter não salva automa
