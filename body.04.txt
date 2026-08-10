@@ -1,0 +1,75 @@
+ticamente. Use o botão abaixo para confirmar.</p>
+      <div class="modal-actions"><button type="button" class="secondary close-modal">Cancelar</button><button type="submit" class="primary">Salvar lançamento</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="cardModal" class="modal">
+    <form id="cardForm" method="dialog" autocomplete="off">
+      <div class="modal-head"><h2>Novo cartão</h2><button type="button" class="icon-btn close-modal">×</button></div>
+      <div class="form-grid">
+        <label class="field full"><span>Nome do cartão</span><input name="name" placeholder="Ex.: Nubank" required maxlength="40" /></label>
+        <label class="field"><span>Limite</span><input name="limit" inputmode="decimal" placeholder="0,00" required /></label>
+        <label class="field"><span>Fecha dia</span><input name="closingDay" type="number" min="1" max="31" required /></label>
+        <label class="field"><span>Vence dia</span><input name="dueDay" type="number" min="1" max="31" required /></label>
+      </div>
+      <div class="modal-actions"><button type="button" class="secondary close-modal">Cancelar</button><button type="submit" class="primary">Salvar cartão</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="purchaseModal" class="modal">
+    <form id="purchaseForm" method="dialog" autocomplete="off">
+      <div class="modal-head"><h2>Nova compra no cartão</h2><button type="button" class="icon-btn close-modal">×</button></div>
+      <div class="form-grid">
+        <label class="field full"><span>Cartão</span><select name="cardId" id="purchaseCardSelect" required></select></label>
+        <label class="field full"><span>Descrição</span><input name="description" placeholder="Ex.: Celular" required maxlength="80" /></label>
+        <label class="field"><span>Valor total</span><input name="amount" inputmode="decimal" placeholder="0,00" required /></label>
+        <label class="field"><span>Parcelas</span><input name="installments" type="number" min="1" max="48" value="1" required /></label>
+        <label class="field"><span>Data da compra</span><input name="date" type="date" required /></label>
+        <label class="field"><span>Categoria</span><select name="category" id="purchaseCategory" required></select></label>
+      </div>
+      <div id="installmentPreview" class="info-box">Informe o valor para visualizar as parcelas.</div>
+      <div class="modal-actions"><button type="button" class="secondary close-modal">Cancelar</button><button type="submit" class="primary">Salvar compra</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="billModal" class="modal">
+    <form id="billForm" method="dialog" autocomplete="off">
+      <div class="modal-head"><h2>Nova conta fixa</h2><button type="button" class="icon-btn close-modal">×</button></div>
+      <div class="form-grid">
+        <label class="field full"><span>Descrição</span><input name="description" placeholder="Ex.: Internet" required maxlength="80" /></label>
+        <label class="field"><span>Valor</span><input name="amount" inputmode="decimal" placeholder="0,00" required /></label>
+        <label class="field"><span>Vencimento</span><input name="dueDay" type="number" min="1" max="31" required /></label>
+        <label class="field"><span>Método de pagamento</span><select name="paymentMethod" required>
+          <option value="">Selecione...</option>
+          <option value="Dinheiro">Dinheiro</option>
+          <option value="Pix">Pix</option>
+          <option value="Débito">Débito</option>
+          <option value="Transferência">Transferência</option>
+          <option value="Boleto">Boleto</option>
+          <option value="Outro">Outro</option>
+        </select></label>
+        <label class="field"><span>Categoria</span><select name="category" id="billCategory" required></select></label>
+      </div>
+      <div class="modal-actions"><button type="button" class="secondary close-modal">Cancelar</button><button type="submit" class="primary">Salvar conta</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="goalModal" class="modal">
+    <form id="goalForm" method="dialog" autocomplete="off">
+      <div class="modal-head"><h2>Nova meta</h2><button type="button" class="icon-btn close-modal">×</button></div>
+      <div class="form-grid">
+        <label class="field full"><span>Objetivo</span><input name="name" placeholder="Ex.: Comprar um carro" required maxlength="80" /></label>
+        <label class="field"><span>Valor da meta</span><input name="target" inputmode="decimal" placeholder="0,00" required /></label>
+        <label class="field"><span>Já guardado</span><input name="current" inputmode="decimal" placeholder="0,00" value="0" /></label>
+        <label class="field full"><span>Prazo (opcional)</span><input name="deadline" type="date" /></label>
+      </div>
+      <div class="modal-actions"><button type="button" class="secondary close-modal">Cancelar</button><button type="submit" class="primary">Salvar meta</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="goalContributionModal" class="modal compact-modal">
+    <form id="goalContributionForm" method="dialog" autocomplete="off">
+      <div class="modal-head"><h2>Adicionar à meta</h2><button type="button" class="icon-btn close-modal">×</button></div>
+      <input type="hidden" name="goalId" />
+      <label class="field"><span>Valor</span><input name="amount" inputmode="decimal" placeholder="0,00" required /></label>
+      <div class="modal-actions"><button type="button" class="secondary c
