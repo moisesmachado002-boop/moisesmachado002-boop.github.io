@@ -1,0 +1,96 @@
+ dashboardPeriod === 'month' ? monthlySummary(month) : weeklySummary(month);
+    const balance = roundMoney(data.income - data.expense);
+
+    els.incomeValue.textContent = money(data.income);
+    els.expenseValue.textContent = money(data.expense);
+    els.balanceValue.textContent = money(balance);
+    els.incomeCount.textContent = plural(data.incomeCount, 'lançamento');
+    els.expenseCount.textContent = plural(data.expenseCount, 'lançamento');
+    els.heroIndicator.textContent = balance >= 0 ? '↗' : '↘';
+    els.balanceCaption.textContent = dashboardPeriod === 'month' ? 'Receitas menos despesas do mês' : `Últimos 7 dias até ${formatDate(data.endDate)}`;
+
+    const inv = invoiceSummary(month);
+    els.invoiceValue.textContent = money(inv.total);
+    $('#invoiceCaption').textContent = `${plural(inv.count, 'parcela')} em ${formatMonth(month)}`;
+
+    const pending = getPendingBills(month);
+    els.pendingBillsValue.textContent = money(sum(pending, b => b.amount));
+    els.pendingBillsCount.textContent = plural(pending.length, 'conta');
+
+    const availability = availabilitySummary(todayLocal());
+    els.accountBalanceValue.textContent = money(availability.account);
+    els.cashBalanceValue.textContent = money(availability.cash);
+    els.availableTotalValue.textContent = money(availability.total);
+    els.unclassifiedBalanceValue.textContent = money(availability.unclassified);
+    els.availabilityCaption.textContent = `Posição até ${formatDate(todayLocal())}. Compras no cartão só mexem na disponibilidade quando o pagamento é lançado.`;
+
+    renderCategoryBars(els.categoryBars, data.expenseByCategory);
+    renderRecentTransactions();
+  }
+
+  function renderRecentTransactions() {
+    const items = state.transactions
+      .slice().sort((a, b) => `${b.date}${b.id}`.localeCompare(`${a.date}${a.id}`)).slice(0, 6);
+    if (!items.length) return setEmpty(els.recentTransactions, 'Nenhum lançamento ainda.');
+    els.recentTransactions.classList.remove('empty-state');
+    els.recentTransactions.innerHTML = items.map(tx => transactionItemHtml(tx, false)).join('');
+  }
+
+  function renderTransactions() {
+    const search = els.transactionSearch.value.trim().toLowerCase();
+    const type = els.transactionTypeFilter.value;
+    const month = els.transactionMonthFilter.value;
+    const items = state.transactions.filter(tx => {
+      return (!month || tx.date.startsWith(month)) && (type === 'all' || tx.type === type) &&
+        (!search || `${tx.description} ${tx.category} ${tx.paymentMethod || ''} ${tx.note || ''}`.toLowerCase().includes(search));
+    }).sort((a, b) => `${b.date}${b.id}`.localeCompare(`${a.date}${a.id}`));
+
+    if (!items.length) return setEmpty(els.transactionsList, 'Nenhum lançamento encontrado.');
+    els.transactionsList.classList.remove('empty-state');
+    els.transactionsList.innerHTML = items.map(tx => transactionItemHtml(tx, true)).join('');
+    $$('[data-delete-tx]', els.transactionsList).forEach(btn => btn.addEventListener('click', () => deleteTransaction(btn.dataset.deleteTx)));
+  }
+
+  function transactionItemHtml(tx, withActions) {
+    const sign = tx.type === 'income' ? '+' : '−';
+    const sourceBadge = tx.source === 'bill' ? '<span class="badge">Conta fixa</span>' : '';
+    return `<article class="list-item">
+      <div class="item-main">
+        <div class="item-title"><span>${escapeHtml(tx.description)}</span>${sourceBadge}</div>
+        <div class="item-meta">${escapeHtml(tx.category)}${tx.paymentMethod ? ` · ${escapeHtml(tx.paymentMethod)}` : ''} · ${formatDate(tx.date)}${tx.note ? ` · ${escapeHtml(tx.note)}` : ''}</div>
+        ${withActions ? `<div class="item-actions"><button class="mini-btn danger-text" data-delete-tx="${tx.id}">Excluir</button></div>` : ''}
+      </div>
+      <div class="amount ${tx.type}">${sign} ${money(tx.amount)}</div>
+    </article>`;
+  }
+
+  function deleteTransaction(id) {
+    const tx = state.transactions.find(t => t.id === id);
+    if (!tx || !confirm(`Excluir "${tx.description}"?`)) return;
+    state.transactions = state.transactions.filter(t => t.id !== id);
+    state.billPayments = state.billPayments.filter(p => p.transactionId !== id);
+    saveState(); renderAll(); toast('Lançamento excluído.');
+  }
+
+  function updateCardSelect() {
+    els.purchaseCardSelect.innerHTML = state.cards.length
+      ? state.cards.map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('')
+      : '<option value="">Nenhum cartão cadastrado</option>';
+  }
+
+  function renderCards() {
+    const month = els.invoiceMonth.value || currentMonth();
+    if (!state.cards.length) {
+      setEmpty(els.cardsGrid, 'Cadastre seu primeiro cartão.');
+    } else {
+      els.cardsGrid.classList.remove('empty-state');
+      els.cardsGrid.innerHTML = state.cards.map(card => {
+        const total = cardInvoiceTotal(card.id, month);
+        const pct = Math.min(100, card.limit > 0 ? total / card.limit * 100 : 0);
+        const available = Math.max(0, card.limit - total);
+        return `<article class="credit-card">
+          <div class="card-head"><div class="card-name">${escapeHtml(card.name)}</div><span class="badge">vence dia ${card.dueDay}</span></div>
+          <div class="card-limit">${money(total)}</div>
+          <div class="card-meta">Fatura de ${formatMonth(month)} · limite livre no mês: ${money(available)}</div>
+          <div class="progress"><span style="width:${pct.toFixed(1)}%"></span></div>
+          <div class="card-meta" style="margin-top:8px">Limite ${money(ca
