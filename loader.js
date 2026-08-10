@@ -1,5 +1,5 @@
 (async () => {
-  const VERSION = '1.3.5';
+  const VERSION = '1.4.0';
   const bodyParts = ["body.01.txt", "body.02.txt", "body.03.txt", "body.04.txt", "body.05.txt"];
   const styleParts = ["style.01.txt", "style.02.txt", "style.03.txt"];
   const appParts = ["app.01.txt", "app.02.txt", "app.03.txt", "app.04.txt", "app.05.txt", "app.06.txt", "app.07.txt", "app.08.txt", "app.09.txt", "app.10.txt", "app.11.txt"];
@@ -14,6 +14,7 @@
     const js = await readParts(appParts);
     (0, eval)(js);
     await loadScript(versioned('./category-fix.js'));
+    await loadScript(versioned('./loans.js'));
   } catch (err) {
     document.body.innerHTML = '<div style="font-family:system-ui;padding:24px">Não foi possível carregar o Meu Financeiro. Verifique sua internet e atualize a página.</div>';
     console.error(err);
