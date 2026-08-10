@@ -17,6 +17,7 @@
     await loadScript(versioned('./category-fix.js'));
     await loadScript(versioned('./loans.js'));
     await loadScript(versioned('./v15.js'));
+    await loadScript(versioned('./v15-safety.js'));
   } catch (err) {
     document.body.innerHTML = '<div style="font-family:system-ui;padding:24px">Não foi possível carregar o Meu Financeiro. Verifique sua internet e atualize a página.</div>';
     console.error(err);
