@@ -1,0 +1,68 @@
+-top: 3px; }
+.amount { font-weight: 900; white-space: nowrap; }
+.amount.income { color: var(--success); }
+.amount.expense { color: var(--danger); }
+.badge { font-size: .69rem; padding: 4px 7px; background: var(--surface); border: 1px solid var(--line); border-radius: 999px; color: var(--muted); white-space: nowrap; }
+.item-actions { display: flex; gap: 6px; margin-top: 8px; }
+.mini-btn { border: 1px solid var(--line); background: var(--surface); color: var(--text); border-radius: 9px; padding: 6px 8px; font-size: .74rem; font-weight: 800; }
+.mini-btn.danger-text { color: var(--danger); }
+.empty-state { color: var(--muted); text-align: center; padding: 20px 10px; }
+.category-bars { display: grid; gap: 12px; }
+.bar-row { display: grid; gap: 6px; }
+.bar-top { display: flex; justify-content: space-between; gap: 10px; font-size: .83rem; }
+.bar-track { height: 10px; border-radius: 999px; background: var(--surface-2); overflow: hidden; }
+.bar-fill { height: 100%; border-radius: inherit; background: var(--brand); min-width: 3px; }
+.filter-row { margin-bottom: 14px; }
+.filter-row input:first-child { flex: 1; }
+.filter-row select, .filter-row input[type="month"] { max-width: 180px; }
+.cards-grid, .goals-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.credit-card { padding: 18px; position: relative; overflow: hidden; }
+.credit-card::after { content: ""; position: absolute; width: 130px; height: 130px; right: -50px; top: -50px; border-radius: 50%; background: color-mix(in srgb, var(--brand) 14%, transparent); }
+.card-head { display: flex; justify-content: space-between; position: relative; z-index: 1; }
+.card-name { font-weight: 900; }
+.card-limit { font-size: 1.45rem; font-weight: 900; margin: 18px 0 5px; }
+.card-meta { color: var(--muted); font-size: .78rem; }
+.progress { height: 9px; background: var(--surface-2); border-radius: 999px; overflow: hidden; margin-top: 12px; }
+.progress > span { display: block; height: 100%; background: var(--brand); border-radius: inherit; }
+.goal-card { padding: 18px; }
+.goal-card h3 { margin-bottom: 4px; }
+.goal-values { display: flex; justify-content: space-between; margin-top: 12px; font-size: .8rem; color: var(--muted); }
+.goal-values strong { color: var(--text); }
+.month-chart { display: grid; grid-template-columns: repeat(6, minmax(40px, 1fr)); gap: 10px; align-items: end; min-height: 200px; padding-top: 10px; }
+.month-col { display: grid; grid-template-rows: 1fr auto; height: 170px; gap: 8px; align-items: end; }
+.month-bars { display: flex; gap: 3px; height: 130px; align-items: end; justify-content: center; }
+.month-bars span { width: 12px; min-height: 3px; border-radius: 5px 5px 2px 2px; background: var(--brand); }
+.month-bars span.expense-bar { background: color-mix(in srgb, var(--danger) 82%, var(--brand)); }
+.month-label { text-align: center; font-size: .72rem; color: var(--muted); }
+.settings-panel { display: flex; align-items: center; justify-content: space-between; gap: 20px; }
+.settings-panel p { color: var(--muted); margin-bottom: 0; }
+.danger-zone { border-color: color-mix(in srgb, var(--danger) 35%, var(--line)); }
+.info-box { background: var(--surface-2); border: 1px solid var(--line); padding: 12px; border-radius: 12px; color: var(--muted); font-size: .84rem; margin-top: 14px; }
+.form-hint { color: var(--muted); font-size: .78rem; margin: 10px 0 0; }
+.modal { width: min(560px, calc(100vw - 24px)); border: 1px solid var(--line); border-radius: 22px; padding: 0; background: var(--surface); color: var(--text); box-shadow: 0 26px 80px rgba(0,0,0,.28); }
+.modal::backdrop { background: rgba(3, 7, 18, .58); backdrop-filter: blur(3px); }
+.modal form { padding: 20px; }
+.modal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+.modal-head .icon-btn { border: 0; background: var(--surface-2); }
+.form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.field.full { grid-column: 1 / -1; }
+.modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; }
+.compact-modal { width: min(420px, calc(100vw - 24px)); }
+.toast { position: fixed; left: 50%; bottom: 94px; transform: translate(-50%, 20px); background: #111827; color: white; padding: 11px 15px; border-radius: 12px; opacity: 0; pointer-events: none; transition: .2s; z-index: 80; box-shadow: var(--shadow); }
+.toast.show { opacity: 1; transform: translate(-50%, 0); }
+.bottom-nav {
+  position: fixed; left: 50%; bottom: max(12px, env(safe-area-inset-bottom)); transform: translateX(-50%);
+  width: min(760px, calc(100% - 20px)); display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px;
+  padding: 7px; background: color-mix(in srgb, var(--surface) 92%, transparent); border: 1px solid var(--line);
+  border-radius: 22px; box-shadow: 0 16px 50px rgba(15,23,42,.16); backdrop-filter: blur(16px); z-index: 50;
+}
+.bottom-nav button { border: 0; background: transparent; color: var(--muted); border-radius: 15px; padding: 7px 3px; display: grid; gap: 2px; place-items: center; }
+.bottom-nav button span { font-size: 1.1rem; }
+.bottom-nav button small { font-size: .64rem; font-weight: 800; }
+.bottom-nav button.active { background: color-mix(in srgb, var(--brand) 12%, var(--surface)); color: var(--brand); }
+
+@media (max-width: 780px) {
+  .app-shell { padding-inline: 12px; }
+  .stats-grid { grid-template-columns: repeat(2, 1fr); }
+  .cards-grid, .goals-grid { grid-template-columns: 1fr; }
+  .filter-row { display
