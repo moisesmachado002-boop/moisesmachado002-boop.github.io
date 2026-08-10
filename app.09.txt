@@ -1,0 +1,128 @@
+if (method === 'Dinheiro') return 'cash';
+    if (['Pix', 'Débito', 'Transferência', 'Boleto'].includes(method)) return 'account';
+    return 'unclassified';
+  }
+
+  function availabilitySummary(cutoffDate = todayLocal()) {
+    const opening = state.openingBalances || { account: 0, cash: 0 };
+    let account = Number(opening.account) || 0;
+    let cash = Number(opening.cash) || 0;
+    let unclassified = 0;
+
+    state.transactions.forEach(tx => {
+      if (!tx.date || tx.date > cutoffDate) return;
+      const signed = tx.type === 'income' ? Number(tx.amount) : -Number(tx.amount);
+      const location = paymentLocation(tx.paymentMethod);
+      if (location === 'cash') cash += signed;
+      else if (location === 'account') account += signed;
+      else unclassified += signed;
+    });
+
+    account = roundMoney(account);
+    cash = roundMoney(cash);
+    unclassified = roundMoney(unclassified);
+    return { account, cash, unclassified, total: roundMoney(account + cash) };
+  }
+
+  function reportCutoffDate(month) {
+    const current = currentMonth();
+    if (month >= current) return todayLocal();
+    return `${month}-${String(daysInMonth(month)).padStart(2, '0')}`;
+  }
+
+  function formatMoneyInput(value) {
+    const n = Number(value) || 0;
+    return n ? n.toFixed(2).replace('.', ',') : '';
+  }
+
+  function monthlySummary(month) {
+    const txs = state.transactions.filter(tx => tx.date.startsWith(month));
+    const incomeTxs = txs.filter(tx => tx.type === 'income');
+    const expenseTxs = txs.filter(tx => tx.type === 'expense');
+    const installments = getInvoiceInstallments(month);
+    const income = sum(incomeTxs, t => t.amount);
+    const cashExpense = sum(expenseTxs, t => t.amount);
+    const invoiceExpense = sum(installments, i => i.amount);
+    const expenseByCategory = new Map();
+    expenseTxs.forEach(t => addMap(expenseByCategory, t.category, t.amount));
+    installments.forEach(i => addMap(expenseByCategory, i.category, i.amount));
+    return {
+      income: roundMoney(income), expense: roundMoney(cashExpense + invoiceExpense),
+      incomeCount: incomeTxs.length, expenseCount: expenseTxs.length + installments.length,
+      expenseByCategory
+    };
+  }
+
+  function weeklySummary(month) {
+    const nowMonth = currentMonth();
+    const endDate = month === nowMonth ? todayLocal() : `${month}-${String(daysInMonth(month)).padStart(2, '0')}`;
+    const end = localDate(endDate);
+    const start = new Date(end); start.setDate(start.getDate() - 6);
+    const txs = state.transactions.filter(tx => {
+      const d = localDate(tx.date); return d >= start && d <= end;
+    });
+    const incomeTxs = txs.filter(tx => tx.type === 'income');
+    const expenseTxs = txs.filter(tx => tx.type === 'expense');
+    const expenseByCategory = new Map();
+    expenseTxs.forEach(t => addMap(expenseByCategory, t.category, t.amount));
+    return {
+      income: roundMoney(sum(incomeTxs, t => t.amount)), expense: roundMoney(sum(expenseTxs, t => t.amount)),
+      incomeCount: incomeTxs.length, expenseCount: expenseTxs.length, expenseByCategory, endDate
+    };
+  }
+
+  function invoiceSummary(month) {
+    const items = getInvoiceInstallments(month);
+    return { total: roundMoney(sum(items, i => i.amount)), count: items.length };
+  }
+
+  function cardInvoiceTotal(cardId, month) {
+    return roundMoney(sum(getInvoiceInstallments(month).filter(i => i.cardId === cardId), i => i.amount));
+  }
+
+  function getInvoiceInstallments(month) {
+    const results = [];
+    for (const purchase of state.purchases) {
+      const card = state.cards.find(c => c.id === purchase.cardId);
+      if (!card) continue;
+      const first = firstInvoiceMonth(purchase.date, card.closingDay);
+      const index = monthDiff(first, month);
+      if (index < 0 || index >= purchase.installments) continue;
+      const amounts = installmentAmounts(purchase.amount, purchase.installments);
+      results.push({
+        purchaseId: purchase.id, cardId: card.id, cardName: card.name, description: purchase.description,
+        category: purchase.category, purchaseDate: purchase.date, installments: purchase.installments,
+        installmentIndex: index, amount: amounts[index]
+      });
+    }
+    return results;
+  }
+
+  function firstInvoiceMonth(dateStr, closingDay) {
+    const [y, m, d] = dateStr.split('-').map(Number);
+    const base = `${y}-${String(m).padStart(2, '0')}`;
+    return d <= Number(closingDay) ? base : addMonths(base, 1);
+  }
+
+  function installmentAmounts(total, count) {
+    const cents = Math.round(Number(total) * 100);
+    const base = Math.floor(cents / count);
+    const remainder = cents - base * count;
+    return Array.from({ length: count }, (_, i) => (base + (i < remainder ? 1 : 0)) / 100);
+  }
+
+  function getPendingBills(month) {
+    return state.bills.filter(b => b.active !== false && !isBillPaid(b.id, month));
+  }
+
+  function isBillPaid(billId, month) {
+    return state.billPayments.some(p => p.billId === billId && p.month === month && state.transactions.some(t => t.id === p.transactionId));
+  }
+
+  function exportBackup() {
+    const payload = { exportedAt: new Date().toISOString(), app: 'Meu Financeiro', ...state };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href = url; a.download = `backup_financeiro_${todayLocal()}.json`; a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000); toast('Backup exportado.');
+  
