@@ -1,0 +1,442 @@
+const PARCELAMENTO_SCHEMA_VERSION = 1;
+
+function competenciaValida(valor) {
+    return /^\d{4}-(0[1-9]|1[0-2])$/.test(String(valor || ''));
+}
+
+function normalizarGasto(g = {}) {
+    const competencia = competenciaValida(g.competenciaFatura) ? String(g.competenciaFatura) : '';
+    const mesLegado = typeof g.mesFatura === 'string' ? g.mesFatura.padStart(2, '0') : '';
+    const parcelaAtual = Number.isInteger(Number(g.parcelaAtual)) && Number(g.parcelaAtual) > 0 ? Number(g.parcelaAtual) : null;
+    const totalParcelas = Number.isInteger(Number(g.totalParcelas)) && Number(g.totalParcelas) > 0 ? Number(g.totalParcelas) : null;
+
+    return {
+        ...g,
+        id: typeof g.id === 'string' && g.id.trim() ? g.id.trim() : '',
+        desc: typeof g.desc === 'string' ? g.desc.trim() : '',
+        data: typeof g.data === 'string' ? g.data : '',
+        mesFatura: competencia ? competencia.slice(5, 7) : mesLegado,
+        competenciaFatura: competencia,
+        valor: Number(g.valor),
+        p: typeof g.p === 'string' ? g.p.trim() : '',
+        c: typeof g.c === 'string' ? g.c.trim() : '',
+        parcelamentoId: typeof g.parcelamentoId === 'string' ? g.parcelamentoId.trim() : '',
+        parcelaAtual,
+        totalParcelas,
+        dataCompraOriginal: typeof g.dataCompraOriginal === 'string' && g.dataCompraOriginal ? g.dataCompraOriginal : (typeof g.data === 'string' ? g.data : ''),
+        geradaAutomaticamente: Boolean(g.geradaAutomaticamente),
+        schemaParcelamento: parcelaAtual && totalParcelas ? PARCELAMENTO_SCHEMA_VERSION : null
+    };
+}
+
+function adicionarMesesCompetencia(competencia, quantidade) {
+    if (!competenciaValida(competencia)) return '';
+    const [ano, mes] = competencia.split('-').map(Number);
+    const data = new Date(ano, mes - 1 + quantidade, 1);
+    return `${data.getFullYear()}-${String(data.getMonth() + 1).padStart(2, '0')}`;
+}
+
+function formatarCompetencia(competencia, mesLegado = '') {
+    if (competenciaValida(competencia)) {
+        const [ano, mes] = competencia.split('-');
+        return `${nomesMeses[mes] || mes}/${ano}`;
+    }
+    if (mesLegado && nomesMeses[mesLegado]) return `${nomesMeses[mesLegado]} (sem ano)`;
+    return 'Sem fatura';
+}
+
+function gastoParcelado(g) {
+    return Boolean(g && g.parcelamentoId && g.parcelaAtual && g.totalParcelas);
+}
+
+function descricaoComParcela(g) {
+    if (!gastoParcelado(g)) return escapeHTML(g.desc);
+    return `${escapeHTML(g.desc)} <span class="parcela-badge">${g.parcelaAtual}/${g.totalParcelas}</span>`;
+}
+
+function inserirCamposParcelamento() {
+    if (document.getElementById('anoFatura')) return;
+
+    const grupoMes = document.getElementById('mesFatura')?.closest('.form-group');
+    if (grupoMes) {
+        const grupoAno = document.createElement('div');
+        grupoAno.className = 'form-group';
+        grupoAno.innerHTML = `
+            <label for="anoFatura">Ano da Fatura</label>
+            <input type="number" id="anoFatura" class="campo-teclado" min="2000" max="2100" step="1" data-next="valor">
+        `;
+        grupoMes.insertAdjacentElement('afterend', grupoAno);
+        document.getElementById('mesFatura').setAttribute('data-next', 'anoFatura');
+    }
+
+    const grupoCartao = document.getElementById('cartao')?.closest('.form-group');
+    if (grupoCartao) {
+        const bloco = document.createElement('div');
+        bloco.className = 'parcelamento-wrap';
+        bloco.innerHTML = `
+            <label class="parcelamento-check">
+                <input type="checkbox" id="ehParcelado" onchange="alternarCamposParcelamento()">
+                <span>Compra parcelada</span>
+            </label>
+            <div id="camposParcelamento" class="parcel-fields" hidden>
+                <div class="form-group">
+                    <label for="parcelaAtual">Parcela atual</label>
+                    <input type="number" id="parcelaAtual" min="1" step="1" placeholder="Ex: 2">
+                </div>
+                <div class="parcela-separador">/</div>
+                <div class="form-group">
+                    <label for="totalParcelas">Total parcelas</label>
+                    <input type="number" id="totalParcelas" min="2" step="1" placeholder="Ex: 6">
+                </div>
+            </div>
+        `;
+        grupoCartao.insertAdjacentElement('afterend', bloco);
+    }
+
+    configurarTecladoNovosCampos();
+    definirAnoFaturaPadrao();
+}
+
+function configurarTecladoNovosCampos() {
+    const ano = document.getElementById('anoFatura');
+    if (ano && !ano.dataset.enterConfigurado) {
+        ano.dataset.enterConfigurado = '1';
+        ano.addEventListener('keydown', event => {
+            if (event.key !== 'Enter') return;
+            event.preventDefault();
+            document.getElementById('valor')?.focus();
+        });
+    }
+}
+
+function definirAnoFaturaPadrao() {
+    const campo = document.getElementById('anoFatura');
+    if (campo) campo.value = String(new Date().getFullYear());
+}
+
+function alternarCamposParcelamento(forcarEstado = null) {
+    const check = document.getElementById('ehParcelado');
+    const campos = document.getElementById('camposParcelamento');
+    if (!check || !campos) return;
+    if (typeof forcarEstado === 'boolean') check.checked = forcarEstado;
+    campos.hidden = !check.checked;
+    if (!check.checked) {
+        document.getElementById('parcelaAtual').value = '';
+        document.getElementById('totalParcelas').value = '';
+    }
+}
+
+function competenciaFormulario() {
+    const mes = document.getElementById('mesFatura').value;
+    const ano = String(document.getElementById('anoFatura')?.value || '').trim();
+    const competencia = `${ano}-${mes}`;
+    return competenciaValida(competencia) ? competencia : '';
+}
+
+function dadosParcelamentoFormulario() {
+    const parcelado = Boolean(document.getElementById('ehParcelado')?.checked);
+    if (!parcelado) return { parcelado: false, atual: null, total: null };
+    return {
+        parcelado: true,
+        atual: Number(document.getElementById('parcelaAtual')?.value),
+        total: Number(document.getElementById('totalParcelas')?.value)
+    };
+}
+
+function validarParcelamento(dados) {
+    if (!dados.parcelado) return '';
+    if (!Number.isInteger(dados.atual) || dados.atual < 1) return 'Informe a parcela atual corretamente.';
+    if (!Number.isInteger(dados.total) || dados.total < 2) return 'Informe o total de parcelas corretamente.';
+    if (dados.atual > dados.total) return 'A parcela atual não pode ser maior que o total de parcelas.';
+    return '';
+}
+
+function criarRegistroBase({ id, desc, dataIso, competencia, valor, p, c }) {
+    return {
+        id: id || gerarId(),
+        desc,
+        data: dataIso,
+        dataCompraOriginal: dataIso,
+        mesFatura: competencia.slice(5, 7),
+        competenciaFatura: competencia,
+        valor,
+        p,
+        c,
+        parcelamentoId: '',
+        parcelaAtual: null,
+        totalParcelas: null,
+        geradaAutomaticamente: false,
+        schemaParcelamento: null
+    };
+}
+
+function criarSerieParcelada({ desc, dataIso, competencia, valor, p, c, atual, total, idPrimeira = '' }) {
+    const grupo = gerarId();
+    const registros = [];
+    for (let numero = atual; numero <= total; numero++) {
+        const comp = adicionarMesesCompetencia(competencia, numero - atual);
+        registros.push({
+            id: numero === atual && idPrimeira ? idPrimeira : gerarId(),
+            desc,
+            data: dataIso,
+            dataCompraOriginal: dataIso,
+            mesFatura: comp.slice(5, 7),
+            competenciaFatura: comp,
+            valor,
+            p,
+            c,
+            parcelamentoId: grupo,
+            parcelaAtual: numero,
+            totalParcelas: total,
+            geradaAutomaticamente: numero !== atual,
+            schemaParcelamento: PARCELAMENTO_SCHEMA_VERSION
+        });
+    }
+    return registros;
+}
+
+function escolherEscopoParcelamento(acao, gasto) {
+    const resposta = prompt(
+        `${acao} da compra ${gasto.parcelaAtual}/${gasto.totalParcelas}.\n\n` +
+        'Digite 1 para aplicar SOMENTE nesta parcela.\n' +
+        'Digite 2 para aplicar NESTA E NAS PARCELAS FUTURAS.\n' +
+        'Digite 0 para cancelar.',
+        '1'
+    );
+    if (resposta === null || resposta === '0') return '';
+    if (resposta === '1') return 'uma';
+    if (resposta === '2') return 'futuras';
+    alert('Opção inválida. Nenhuma alteração foi feita.');
+    return '';
+}
+
+function filtrarGastos() {
+    const termo = document.getElementById('inputPesquisa').value.toLowerCase().trim();
+    const mesFiltro = document.getElementById('filtroMes').value;
+    const faturaFiltro = document.getElementById('filtroFatura').value;
+    const anoFiltro = document.getElementById('filtroAno').value;
+
+    return listaGastos.filter(g => {
+        const desc = String(g.desc || '').toLowerCase();
+        const partesData = String(g.data || '').split('-');
+        const anoGasto = partesData[0] || '';
+        const mesGasto = partesData[1] || '';
+
+        let matchFatura = true;
+        if (faturaFiltro.startsWith('LEGACY-')) {
+            matchFatura = !g.competenciaFatura && g.mesFatura === faturaFiltro.slice(7);
+        } else if (faturaFiltro) {
+            matchFatura = g.competenciaFatura === faturaFiltro;
+        }
+
+        return desc.includes(termo) &&
+            (!mesFiltro || mesGasto === mesFiltro) &&
+            matchFatura &&
+            (!anoFiltro || anoGasto === anoFiltro);
+    });
+}
+
+function carregarTabela() {
+    const gastosFiltrados = filtrarGastos();
+    const corpo = document.getElementById('corpoTabela');
+    corpo.innerHTML = '';
+
+    if (gastosFiltrados.length === 0) {
+        corpo.innerHTML = '<tr><td colspan="7" class="empty-state">Nenhum gasto encontrado.</td></tr>';
+        atualizarTotais(gastosFiltrados);
+        if (typeof renderProximasFaturas === 'function') renderProximasFaturas();
+        return;
+    }
+
+    const gastosParaExibir = [...gastosFiltrados].reverse();
+    let html = '';
+    gastosParaExibir.forEach(g => {
+        const idSeguro = encodeURIComponent(g.id);
+        html += `<tr>
+            <td>${descricaoComParcela(g)}</td>
+            <td>${formatarData(g.data)}</td>
+            <td><strong>${escapeHTML(formatarCompetencia(g.competenciaFatura, g.mesFatura))}</strong></td>
+            <td>${formatarMoeda(g.valor)}</td>
+            <td><strong>${escapeHTML(g.p)}</strong></td>
+            <td>${escapeHTML(g.c)}</td>
+            <td style="text-align: center;">
+                <button class="btn-edit" onclick="prepararEdicao(decodeURIComponent('${idSeguro}'))">Editar</button>
+                <button class="btn-del" onclick="removerGasto(decodeURIComponent('${idSeguro}'))">Excluir</button>
+            </td>
+        </tr>`;
+    });
+    corpo.innerHTML = html;
+    atualizarTotais(gastosFiltrados);
+    if (typeof renderProximasFaturas === 'function') renderProximasFaturas();
+}
+
+function salvarGasto() {
+    const desc = document.getElementById('descricao').value.trim();
+    const dataIso = document.getElementById('data').value;
+    const competencia = competenciaFormulario();
+    const valor = Number(document.getElementById('valor').value);
+    const p = document.getElementById('pessoa').value;
+    const c = document.getElementById('cartao').value;
+    const editId = document.getElementById('editId').value;
+    const parcela = dadosParcelamentoFormulario();
+
+    if (!desc || !Number.isFinite(valor) || valor <= 0 || !dataIso) {
+        alert('Por favor, preencha a descrição, data e um valor maior que zero!');
+        return;
+    }
+    if (!competencia) {
+        alert('Informe corretamente o mês e o ano da fatura.');
+        return;
+    }
+    const erroParcela = validarParcelamento(parcela);
+    if (erroParcela) {
+        alert(erroParcela);
+        return;
+    }
+
+    if (!editId) {
+        if (parcela.parcelado) {
+            const novos = criarSerieParcelada({ desc, dataIso, competencia, valor, p, c, atual: parcela.atual, total: parcela.total });
+            listaGastos.push(...novos);
+            alert(`${novos.length} parcela(s) registrada(s): ${parcela.atual}/${parcela.total} até ${parcela.total}/${parcela.total}.`);
+        } else {
+            listaGastos.push(criarRegistroBase({ desc, dataIso, competencia, valor, p, c }));
+        }
+    } else {
+        const index = listaGastos.findIndex(g => g.id === editId);
+        if (index === -1) {
+            alert('Este lançamento não foi encontrado. A edição foi cancelada para evitar alterar outro gasto.');
+            cancelarEdicao();
+            return;
+        }
+        const atual = listaGastos[index];
+
+        if (gastoParcelado(atual)) {
+            const escopo = escolherEscopoParcelamento('Edição', atual);
+            if (!escopo) return;
+            const alvos = escopo === 'futuras'
+                ? listaGastos.filter(g => g.parcelamentoId === atual.parcelamentoId && Number(g.parcelaAtual) >= Number(atual.parcelaAtual))
+                : [atual];
+
+            alvos.forEach(item => {
+                const deslocamento = escopo === 'futuras' ? Number(item.parcelaAtual) - Number(atual.parcelaAtual) : 0;
+                const comp = adicionarMesesCompetencia(competencia, deslocamento);
+                item.desc = desc;
+                item.data = dataIso;
+                item.dataCompraOriginal = dataIso;
+                item.valor = valor;
+                item.p = p;
+                item.c = c;
+                item.competenciaFatura = comp;
+                item.mesFatura = comp.slice(5, 7);
+            });
+        } else if (parcela.parcelado) {
+            const novos = criarSerieParcelada({
+                desc, dataIso, competencia, valor, p, c,
+                atual: parcela.atual, total: parcela.total, idPrimeira: atual.id
+            });
+            listaGastos.splice(index, 1, ...novos);
+        } else {
+            listaGastos[index] = {
+                ...atual,
+                desc, data: dataIso, dataCompraOriginal: dataIso,
+                competenciaFatura: competencia,
+                mesFatura: competencia.slice(5, 7),
+                valor, p, c
+            };
+        }
+    }
+
+    salvarLocal();
+    popularFiltroAnos();
+    if (typeof popularFiltroCompetencias === 'function') popularFiltroCompetencias();
+    popularSelects();
+    carregarTabela();
+    limparFormulario();
+    if (typeof renderAvisoLegado === 'function') renderAvisoLegado();
+}
+
+function prepararEdicao(id) {
+    const g = listaGastos.find(item => item.id === id);
+    if (!g) {
+        alert('Lançamento não encontrado.');
+        carregarTabela();
+        return;
+    }
+
+    popularSelects();
+    document.getElementById('descricao').value = g.desc;
+    document.getElementById('data').value = g.data;
+    document.getElementById('mesFatura').value = g.competenciaFatura ? g.competenciaFatura.slice(5, 7) : (g.mesFatura || '01');
+    document.getElementById('anoFatura').value = g.competenciaFatura ? g.competenciaFatura.slice(0, 4) : String(new Date().getFullYear());
+    document.getElementById('valor').value = g.valor;
+    document.getElementById('pessoa').value = g.p;
+    document.getElementById('cartao').value = g.c;
+    document.getElementById('editId').value = g.id;
+
+    const check = document.getElementById('ehParcelado');
+    check.disabled = gastoParcelado(g);
+    alternarCamposParcelamento(gastoParcelado(g));
+    document.getElementById('parcelaAtual').value = gastoParcelado(g) ? g.parcelaAtual : '';
+    document.getElementById('totalParcelas').value = gastoParcelado(g) ? g.totalParcelas : '';
+    document.getElementById('parcelaAtual').disabled = gastoParcelado(g);
+    document.getElementById('totalParcelas').disabled = gastoParcelado(g);
+
+    document.getElementById('btnAdicionar').innerText = 'Atualizar Gasto';
+    document.getElementById('btnCancelarEdicao').hidden = false;
+    document.getElementById('descricao').focus();
+}
+
+function removerGasto(id) {
+    const gasto = listaGastos.find(g => g.id === id);
+    if (!gasto) {
+        alert('Lançamento não encontrado.');
+        carregarTabela();
+        return;
+    }
+
+    let idsExcluir = [id];
+    if (gastoParcelado(gasto)) {
+        const escopo = escolherEscopoParcelamento('Exclusão', gasto);
+        if (!escopo) return;
+        if (escopo === 'futuras') {
+            idsExcluir = listaGastos
+                .filter(g => g.parcelamentoId === gasto.parcelamentoId && Number(g.parcelaAtual) >= Number(gasto.parcelaAtual))
+                .map(g => g.id);
+        }
+    }
+
+    if (!confirm(`Confirmar exclusão de ${idsExcluir.length} lançamento(s)?`)) return;
+    const conjunto = new Set(idsExcluir);
+    listaGastos = listaGastos.filter(g => !conjunto.has(g.id));
+    salvarLocal();
+
+    if (conjunto.has(document.getElementById('editId').value)) limparFormulario();
+    popularSelects();
+    popularFiltroAnos();
+    if (typeof popularFiltroCompetencias === 'function') popularFiltroCompetencias();
+    carregarTabela();
+    if (typeof renderAvisoLegado === 'function') renderAvisoLegado();
+}
+
+function limparFormulario() {
+    document.getElementById('descricao').value = '';
+    document.getElementById('valor').value = '';
+    document.getElementById('editId').value = '';
+    document.getElementById('btnAdicionar').innerText = 'Adicionar Gasto';
+    document.getElementById('btnCancelarEdicao').hidden = true;
+
+    const check = document.getElementById('ehParcelado');
+    if (check) check.disabled = false;
+    const atual = document.getElementById('parcelaAtual');
+    const total = document.getElementById('totalParcelas');
+    if (atual) atual.disabled = false;
+    if (total) total.disabled = false;
+    alternarCamposParcelamento(false);
+
+    definirDataHoje();
+    definirAnoFaturaPadrao();
+    document.getElementById('descricao').focus();
+}
+
+inserirCamposParcelamento();

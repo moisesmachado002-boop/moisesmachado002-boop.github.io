@@ -1,0 +1,68 @@
+/* Sprint 3 - sincronização online isolada */
+.cloud-panel {
+    margin: 0 0 20px;
+    padding: 15px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: #fff;
+}
+
+.cloud-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 12px;
+    margin-bottom: 12px;
+}
+
+.cloud-head h3 {
+    margin: 0;
+    font-size: 1rem;
+}
+
+.cloud-head p {
+    margin: 4px 0 0;
+    font-size: 0.8rem;
+    color: var(--text-muted);
+}
+
+.cloud-status {
+    white-space: nowrap;
+    padding: 5px 9px;
+    border-radius: 999px;
+    background: #e2e8f0;
+    color: var(--text-muted);
+    font-size: 0.72rem;
+    font-weight: 700;
+}
+
+.cloud-status.synced { background: #dcfce7; color: #166534; }
+.cloud-status.syncing { background: #dbeafe; color: #1d4ed8; }
+.cloud-status.offline { background: #f1f5f9; color: #475569; }
+.cloud-status.error { background: #fee2e2; color: #991b1b; }
+
+.cloud-auth,
+.cloud-user {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 8px;
+    align-items: center;
+}
+
+.cloud-auth[hidden],
+.cloud-user[hidden] { display: none !important; }
+
+.cloud-user span {
+    font-size: 0.82rem;
+    color: var(--text-muted);
+    overflow-wrap: anywhere;
+}
+
+@media (max-width: 620px) {
+    .cloud-head { flex-direction: column; }
+    .cloud-status { align-self: flex-start; }
+}
+
+@media print {
+    .cloud-panel { display: none !important; }
+}

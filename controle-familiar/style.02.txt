@@ -1,0 +1,143 @@
+/* Sprint 2 - competência, parcelamento e próximas faturas */
+.parcelamento-wrap {
+    grid-column: 1 / -1;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px;
+    background: #f8fafc;
+}
+
+.parcelamento-check {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 0;
+    text-transform: none;
+    cursor: pointer;
+}
+
+.parcelamento-check input {
+    width: auto;
+    margin: 0;
+}
+
+.parcel-fields {
+    display: grid;
+    grid-template-columns: minmax(120px, 1fr) auto minmax(120px, 1fr);
+    gap: 10px;
+    align-items: end;
+    margin-top: 12px;
+    max-width: 380px;
+}
+
+.parcel-fields[hidden] { display: none !important; }
+
+.parcela-separador {
+    font-size: 1.4rem;
+    font-weight: 700;
+    color: var(--text-muted);
+    padding-bottom: 8px;
+}
+
+.parcela-badge {
+    display: inline-block;
+    margin-left: 5px;
+    padding: 2px 6px;
+    border-radius: 999px;
+    background: #dbeafe;
+    color: #1d4ed8;
+    font-size: 0.72rem;
+    font-weight: 700;
+    white-space: nowrap;
+}
+
+.proximas-faturas-section {
+    margin: 0 0 20px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 15px;
+    background: #f8fafc;
+}
+
+.section-title-row h3 {
+    margin: 0;
+    font-size: 1rem;
+    color: var(--text-main);
+}
+
+.section-title-row p {
+    margin: 4px 0 12px;
+    font-size: 0.82rem;
+    color: var(--text-muted);
+}
+
+.proximas-faturas-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 10px;
+}
+
+.fatura-futura-card {
+    background: #fff;
+    border: 1px solid var(--border);
+    border-left: 4px solid var(--warning);
+    border-radius: 6px;
+    padding: 10px 12px;
+}
+
+.fatura-futura-mes {
+    font-size: 0.75rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    color: var(--text-muted);
+}
+
+.fatura-futura-valor {
+    margin-top: 4px;
+    font-size: 1rem;
+    font-weight: 700;
+    color: var(--text-main);
+}
+
+.fatura-futura-detalhe {
+    margin-top: 3px;
+    font-size: 0.72rem;
+    color: var(--text-muted);
+}
+
+.empty-upcoming {
+    color: var(--text-muted);
+    font-size: 0.85rem;
+    padding: 8px 0;
+}
+
+.legacy-warning {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 12px;
+    margin-bottom: 12px;
+    border: 1px solid #f59e0b;
+    border-radius: 6px;
+    background: #fffbeb;
+    color: #92400e;
+}
+
+.legacy-warning div {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    font-size: 0.8rem;
+}
+
+.legacy-warning span { color: #78350f; }
+
+@media (max-width: 620px) {
+    .parcel-fields { max-width: none; }
+    .legacy-warning { align-items: stretch; flex-direction: column; }
+}
+
+@media print {
+    .proximas-faturas-section { display: none !important; }
+}

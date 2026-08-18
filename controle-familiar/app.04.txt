@@ -1,0 +1,279 @@
+function popularFiltroCompetencias() {
+    const select = document.getElementById('filtroFatura');
+    if (!select) return;
+    const atual = select.value;
+
+    const competencias = [...new Set(
+        listaGastos.map(g => g.competenciaFatura).filter(competenciaValida)
+    )].sort().reverse();
+
+    const mesesLegados = [...new Set(
+        listaGastos.filter(g => !g.competenciaFatura && g.mesFatura).map(g => g.mesFatura)
+    )].sort();
+
+    let html = '<option value="">Todas as Faturas</option>';
+    html += competencias.map(comp => `<option value="${comp}">${escapeHTML(formatarCompetencia(comp))}</option>`).join('');
+    if (mesesLegados.length) {
+        html += '<optgroup label="Antigos sem ano">' + mesesLegados.map(mes =>
+            `<option value="LEGACY-${mes}">${escapeHTML(formatarCompetencia('', mes))}</option>`
+        ).join('') + '</optgroup>';
+    }
+    select.innerHTML = html;
+
+    if ([...select.options].some(op => op.value === atual)) select.value = atual;
+}
+
+function inserirResumoProximasFaturas() {
+    if (document.getElementById('proximasFaturasSection')) return;
+    const totais = document.getElementById('totaisDashboard');
+    if (!totais) return;
+
+    const section = document.createElement('section');
+    section.id = 'proximasFaturasSection';
+    section.className = 'proximas-faturas-section';
+    section.innerHTML = `
+        <div class="section-title-row">
+            <div>
+                <h3>Próximas faturas</h3>
+                <p>Valores já comprometidos em competências futuras.</p>
+            </div>
+        </div>
+        <div id="avisoLegado"></div>
+        <div id="proximasFaturas" class="proximas-faturas-grid"></div>
+    `;
+    totais.insertAdjacentElement('afterend', section);
+}
+
+function competenciaAtualLocal() {
+    const agora = new Date();
+    return `${agora.getFullYear()}-${String(agora.getMonth() + 1).padStart(2, '0')}`;
+}
+
+function renderProximasFaturas() {
+    const container = document.getElementById('proximasFaturas');
+    if (!container) return;
+
+    const atual = competenciaAtualLocal();
+    const grupos = {};
+    listaGastos.forEach(g => {
+        if (!competenciaValida(g.competenciaFatura) || g.competenciaFatura <= atual) return;
+        if (!grupos[g.competenciaFatura]) grupos[g.competenciaFatura] = { total: 0, qtd: 0, parcelas: 0 };
+        grupos[g.competenciaFatura].total += Number(g.valor) || 0;
+        grupos[g.competenciaFatura].qtd += 1;
+        if (gastoParcelado(g)) grupos[g.competenciaFatura].parcelas += 1;
+    });
+
+    const competencias = Object.keys(grupos).sort().slice(0, 8);
+    if (!competencias.length) {
+        container.innerHTML = '<div class="empty-upcoming">Nenhum valor futuro programado.</div>';
+        return;
+    }
+
+    container.innerHTML = competencias.map(comp => {
+        const info = grupos[comp];
+        const detalhe = info.parcelas
+            ? `${info.qtd} lançamento(s) · ${info.parcelas} parcela(s)`
+            : `${info.qtd} lançamento(s)`;
+        return `<div class="fatura-futura-card">
+            <div class="fatura-futura-mes">${escapeHTML(formatarCompetencia(comp))}</div>
+            <div class="fatura-futura-valor">${formatarMoeda(info.total)}</div>
+            <div class="fatura-futura-detalhe">${escapeHTML(detalhe)}</div>
+        </div>`;
+    }).join('');
+}
+
+function renderAvisoLegado() {
+    const container = document.getElementById('avisoLegado');
+    if (!container) return;
+    const legados = listaGastos.filter(g => !competenciaValida(g.competenciaFatura) && g.mesFatura);
+    if (!legados.length) {
+        container.innerHTML = '';
+        return;
+    }
+
+    container.innerHTML = `
+        <div class="legacy-warning">
+            <div>
+                <strong>${legados.length} lançamento(s) antigo(s) ainda estão sem o ano da fatura.</strong>
+                <span>Eles continuam preservados. Defina o ano somente se esses registros forem da mesma fatura anual.</span>
+            </div>
+            <button type="button" class="btn-secondary" onclick="migrarAnoFaturaLegado()">Definir ano</button>
+        </div>
+    `;
+}
+
+function migrarAnoFaturaLegado() {
+    const legados = listaGastos.filter(g => !competenciaValida(g.competenciaFatura) && g.mesFatura);
+    if (!legados.length) return;
+
+    const sugestao = String(new Date().getFullYear());
+    const resposta = prompt(
+        `Existem ${legados.length} lançamentos antigos sem ano da fatura.\n\n` +
+        'Informe o ano que deve ser aplicado a TODOS esses lançamentos.\n' +
+        'Se houver registros de anos diferentes, clique em Cancelar e não faça esta conversão.',
+        sugestao
+    );
+    if (resposta === null) return;
+    const ano = Number(resposta);
+    if (!Number.isInteger(ano) || ano < 2000 || ano > 2100) {
+        alert('Ano inválido. Nenhuma alteração foi feita.');
+        return;
+    }
+
+    if (!confirm(`Aplicar o ano ${ano} aos ${legados.length} lançamentos antigos?`)) return;
+    legados.forEach(g => {
+        g.competenciaFatura = `${ano}-${g.mesFatura}`;
+    });
+    salvarLocal();
+    popularFiltroCompetencias();
+    carregarTabela();
+    renderAvisoLegado();
+    alert('Ano da fatura aplicado aos lançamentos antigos.');
+}
+
+function validarEstruturaGasto(g) {
+    if (!g || typeof g !== 'object' || Array.isArray(g)) return 'registro não é um objeto';
+    if (typeof g.desc !== 'string' || !g.desc.trim()) return 'descrição inválida';
+    if (typeof g.data !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(g.data)) return 'data inválida';
+    if (!/^\d{2}$/.test(String(g.mesFatura || '')) || !nomesMeses[String(g.mesFatura)]) return 'mês da fatura inválido';
+    if (g.competenciaFatura && !competenciaValida(g.competenciaFatura)) return 'competência da fatura inválida';
+    if (!Number.isFinite(Number(g.valor)) || Number(g.valor) <= 0) return 'valor inválido';
+    if (typeof g.p !== 'string' || !g.p.trim()) return 'responsável inválido';
+    if (typeof g.c !== 'string' || !g.c.trim()) return 'cartão inválido';
+
+    if (g.parcelaAtual !== undefined && g.parcelaAtual !== null && g.parcelaAtual !== '') {
+        const atual = Number(g.parcelaAtual);
+        const total = Number(g.totalParcelas);
+        if (!Number.isInteger(atual) || !Number.isInteger(total) || atual < 1 || total < 2 || atual > total) {
+            return 'parcelamento inválido';
+        }
+    }
+    return '';
+}
+
+function importarJSON(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = function(e) {
+        try {
+            const conteudo = JSON.parse(e.target.result);
+            const dados = Array.isArray(conteudo) ? conteudo : (conteudo && Array.isArray(conteudo.gastos) ? conteudo.gastos : null);
+            if (!dados) {
+                alert('O arquivo JSON não tem o formato esperado.');
+                return;
+            }
+
+            const erros = [];
+            dados.forEach((g, index) => {
+                const erro = validarEstruturaGasto(g);
+                if (erro) erros.push(`Registro ${index + 1}: ${erro}`);
+            });
+            if (erros.length) {
+                const resumo = erros.slice(0, 5).join('\n');
+                const extra = erros.length > 5 ? `\n... e mais ${erros.length - 5} erro(s).` : '';
+                alert(`O backup possui dados inválidos e não foi importado:\n\n${resumo}${extra}`);
+                return;
+            }
+
+            const idsUsados = new Set();
+            const normalizados = dados.map(g => {
+                const item = normalizarGasto(g);
+                if (!item.id || idsUsados.has(item.id)) item.id = gerarId();
+                idsUsados.add(item.id);
+                return item;
+            });
+
+            const avisos = detectarAvisosImportacao(normalizados);
+            const semAno = normalizados.filter(g => !competenciaValida(g.competenciaFatura)).length;
+            let mensagem = `Deseja substituir os dados atuais pelos ${normalizados.length} lançamentos do arquivo importado?`;
+            if (semAno) mensagem += `\n\n${semAno} lançamento(s) são do formato antigo e continuarão sem ano da fatura até você definir esse ano na tela.`;
+            if (avisos.length) mensagem += `\n\nATENÇÃO: ${avisos.length} data(s) suspeita(s). Exemplo:\n${avisos.slice(0, 3).join('\n')}\n\nEssas datas serão preservadas como estão.`;
+            if (!confirm(mensagem)) return;
+
+            listaGastos = normalizados;
+            salvarLocal();
+            popularSelects();
+            popularFiltroAnos();
+            popularFiltroCompetencias();
+            carregarTabela();
+            limparFormulario();
+            renderAvisoLegado();
+            alert('Dados importados com sucesso!');
+        } catch (err) {
+            console.error(err);
+            alert('Erro ao ler o arquivo JSON.');
+        } finally {
+            event.target.value = '';
+        }
+    };
+    reader.readAsText(file);
+}
+
+function gerarPDF() {
+    const gastosFiltrados = filtrarGastos();
+    if (gastosFiltrados.length === 0) {
+        alert('Não há dados filtrados para gerar o relatório.');
+        return;
+    }
+
+    const dataEmissaoStr = `Emitido em: ${new Date().toLocaleDateString('pt-BR')}`;
+    const gastosPorPessoa = {};
+    gastosFiltrados.forEach(g => {
+        if (!gastosPorPessoa[g.p]) gastosPorPessoa[g.p] = [];
+        gastosPorPessoa[g.p].push(g);
+    });
+
+    let htmlCompleto = '';
+    let primeiraPagina = true;
+    Object.keys(gastosPorPessoa).sort().forEach(dono => {
+        const listaDono = gastosPorPessoa[dono];
+        const totalDono = listaDono.reduce((acc, curr) => acc + (Number(curr.valor) || 0), 0);
+        const estiloQuebra = primeiraPagina ? '' : 'page-break-before: always; margin-top: 20px;';
+        primeiraPagina = false;
+
+        htmlCompleto += `<div style="${estiloQuebra}">
+            <div style="text-align:center;margin-bottom:20px;">
+                <h1 style="font-size:16px;margin:0;color:#1f2937;text-transform:uppercase;">Relatório Individual - ${escapeHTML(dono)}</h1>
+                <p style="font-size:11px;color:#4b5563;margin-top:4px;">${dataEmissaoStr}</p>
+                <hr style="border:0;border-top:1px solid #cbd5e1;margin-top:10px;">
+            </div>
+            <table style="width:100%;border-collapse:collapse;font-size:11px;margin-bottom:15px;">
+                <thead><tr style="background-color:#1f2937;color:white;-webkit-print-color-adjust:exact;">
+                    <th style="padding:8px;text-align:left;">Descrição</th>
+                    <th style="padding:8px;text-align:left;">Data</th>
+                    <th style="padding:8px;text-align:left;">Fatura</th>
+                    <th style="padding:8px;text-align:right;">Valor</th>
+                    <th style="padding:8px;text-align:left;">Cartão</th>
+                </tr></thead><tbody>`;
+
+        listaDono.forEach(g => {
+            const desc = gastoParcelado(g) ? `${g.desc} ${g.parcelaAtual}/${g.totalParcelas}` : g.desc;
+            htmlCompleto += `<tr>
+                <td style="padding:7px 8px;border-bottom:1px solid #cbd5e1;">${escapeHTML(desc)}</td>
+                <td style="padding:7px 8px;border-bottom:1px solid #cbd5e1;">${formatarData(g.data)}</td>
+                <td style="padding:7px 8px;border-bottom:1px solid #cbd5e1;">${escapeHTML(formatarCompetencia(g.competenciaFatura, g.mesFatura))}</td>
+                <td style="padding:7px 8px;border-bottom:1px solid #cbd5e1;text-align:right;">${formatarMoeda(g.valor)}</td>
+                <td style="padding:7px 8px;border-bottom:1px solid #cbd5e1;">${escapeHTML(g.c)}</td>
+            </tr>`;
+        });
+
+        htmlCompleto += `</tbody></table>
+            <table style="width:100%;border-top:2px solid #2563eb;margin-top:15px;font-size:13px;font-weight:bold;color:#2563eb;">
+                <tr><td style="padding-top:10px;">TOTAL DE ${escapeHTML(dono).toUpperCase()}:</td>
+                <td style="text-align:right;padding-top:10px;">${formatarMoeda(totalDono)}</td></tr>
+            </table></div>`;
+    });
+
+    const containerPrint = document.getElementById('totaisContainerPrint');
+    containerPrint.innerHTML = htmlCompleto;
+    containerPrint.style.display = 'block';
+    window.print();
+}
+
+inserirResumoProximasFaturas();
+popularFiltroCompetencias();
+carregarTabela();
+renderProximasFaturas();
+renderAvisoLegado();

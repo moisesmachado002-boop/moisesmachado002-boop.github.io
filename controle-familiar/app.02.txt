@@ -1,0 +1,179 @@
+function gerarPDF() {
+    const gastosFiltrados = filtrarGastos();
+    if (gastosFiltrados.length === 0) {
+        alert('Não há dados filtrados para gerar o relatório.');
+        return;
+    }
+
+    const dataEmissaoStr = `Emitido em: ${new Date().toLocaleDateString('pt-BR')}`;
+    document.getElementById('dataEmissao').innerText = dataEmissaoStr;
+
+    const gastosPorPessoa = {};
+    gastosFiltrados.forEach(g => {
+        if (!gastosPorPessoa[g.p]) gastosPorPessoa[g.p] = [];
+        gastosPorPessoa[g.p].push(g);
+    });
+
+    let htmlCompleto = '';
+    let primeiraPagina = true;
+
+    Object.keys(gastosPorPessoa).sort().forEach(dono => {
+        const listaDono = gastosPorPessoa[dono];
+        const totalDono = listaDono.reduce((acc, curr) => acc + (Number(curr.valor) || 0), 0);
+        const estiloQuebra = primeiraPagina ? '' : 'page-break-before: always; margin-top: 20px;';
+        primeiraPagina = false;
+
+        htmlCompleto += `
+            <div style="${estiloQuebra}">
+                <div style="text-align: center; margin-bottom: 20px;">
+                    <h1 style="font-size: 16px; margin: 0; color: #1f2937; text-transform: uppercase;">Relatório Individual - ${escapeHTML(dono)}</h1>
+                    <p style="font-size: 11px; color: #4b5563; margin-top: 4px;">${dataEmissaoStr}</p>
+                    <hr style="border: 0; border-top: 1px solid #cbd5e1; margin-top: 10px;">
+                </div>
+                <table style="width: 100%; border-collapse: collapse; font-size: 11px; margin-bottom: 15px;">
+                    <thead>
+                        <tr style="background-color: #1f2937; color: white; -webkit-print-color-adjust: exact;">
+                            <th style="padding: 8px; text-align: left;">Descrição</th>
+                            <th style="padding: 8px; text-align: left;">Data</th>
+                            <th style="padding: 8px; text-align: left;">Mês Fatura</th>
+                            <th style="padding: 8px; text-align: right;">Valor</th>
+                            <th style="padding: 8px; text-align: left;">Cartão</th>
+                        </tr>
+                    </thead>
+                    <tbody>`;
+
+        listaDono.forEach(g => {
+            const nomeMesFatura = nomesMeses[g.mesFatura] || g.mesFatura;
+            htmlCompleto += `
+                <tr>
+                    <td style="padding: 7px 8px; border-bottom: 1px solid #cbd5e1;">${escapeHTML(g.desc)}</td>
+                    <td style="padding: 7px 8px; border-bottom: 1px solid #cbd5e1;">${formatarData(g.data)}</td>
+                    <td style="padding: 7px 8px; border-bottom: 1px solid #cbd5e1;">${escapeHTML(nomeMesFatura)}</td>
+                    <td style="padding: 7px 8px; border-bottom: 1px solid #cbd5e1; text-align: right;">${formatarMoeda(g.valor)}</td>
+                    <td style="padding: 7px 8px; border-bottom: 1px solid #cbd5e1;">${escapeHTML(g.c)}</td>
+                </tr>`;
+        });
+
+        htmlCompleto += `
+                    </tbody>
+                </table>
+                <table style="width: 100%; border-top: 2px solid #2563eb; margin-top: 15px; font-size: 13px; font-weight: bold; color: #2563eb;">
+                    <tr>
+                        <td style="padding-top: 10px;">TOTAL DE ${escapeHTML(dono).toUpperCase()}:</td>
+                        <td style="text-align: right; padding-top: 10px;">${formatarMoeda(totalDono)}</td>
+                    </tr>
+                </table>
+            </div>`;
+    });
+
+    const containerPrint = document.getElementById('totaisContainerPrint');
+    containerPrint.innerHTML = htmlCompleto;
+    containerPrint.style.display = 'block';
+    window.print();
+}
+
+function limparRelatorioImpressao() {
+    const containerPrint = document.getElementById('totaisContainerPrint');
+    if (!containerPrint) return;
+    containerPrint.style.display = '';
+    containerPrint.innerHTML = '';
+}
+
+function nomeBackupHoje() {
+    return `backup_financeiro_${dataLocalISO()}.json`;
+}
+
+function exportarJSON() {
+    const blob = new Blob([JSON.stringify(listaGastos, null, 2)], { type: 'application/json;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = nomeBackupHoje();
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+}
+
+function validarEstruturaGasto(g) {
+    if (!g || typeof g !== 'object' || Array.isArray(g)) return 'registro não é um objeto';
+    if (typeof g.desc !== 'string' || !g.desc.trim()) return 'descrição inválida';
+    if (typeof g.data !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(g.data)) return 'data inválida';
+    if (!/^\d{2}$/.test(String(g.mesFatura || '')) || !nomesMeses[String(g.mesFatura)]) return 'mês da fatura inválido';
+    if (!Number.isFinite(Number(g.valor)) || Number(g.valor) <= 0) return 'valor inválido';
+    if (typeof g.p !== 'string' || !g.p.trim()) return 'responsável inválido';
+    if (typeof g.c !== 'string' || !g.c.trim()) return 'cartão inválido';
+    return '';
+}
+
+function detectarAvisosImportacao(gastos) {
+    const avisos = [];
+    gastos.forEach((g, index) => {
+        const ano = Number(String(g.data || '').slice(0, 4));
+        if (ano && (ano < 2000 || ano > 2100)) {
+            avisos.push(`Registro ${index + 1}: ano suspeito (${g.data})`);
+        }
+    });
+    return avisos;
+}
+
+function importarJSON(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = function(e) {
+        try {
+            const conteudo = JSON.parse(e.target.result);
+            const dados = Array.isArray(conteudo) ? conteudo : (conteudo && Array.isArray(conteudo.gastos) ? conteudo.gastos : null);
+
+            if (!dados) {
+                alert('O arquivo JSON não tem o formato esperado.');
+                return;
+            }
+
+            const erros = [];
+            dados.forEach((g, index) => {
+                const erro = validarEstruturaGasto(g);
+                if (erro) erros.push(`Registro ${index + 1}: ${erro}`);
+            });
+
+            if (erros.length) {
+                const resumo = erros.slice(0, 5).join('\n');
+                const extra = erros.length > 5 ? `\n... e mais ${erros.length - 5} erro(s).` : '';
+                alert(`O backup possui dados inválidos e não foi importado:\n\n${resumo}${extra}`);
+                return;
+            }
+
+            const idsUsados = new Set();
+            const normalizados = dados.map(g => {
+                const item = normalizarGasto(g);
+                if (!item.id || idsUsados.has(item.id)) item.id = gerarId();
+                idsUsados.add(item.id);
+                return item;
+            });
+
+            const avisos = detectarAvisosImportacao(normalizados);
+            let mensagemConfirmacao = `Deseja substituir os dados atuais pelos ${normalizados.length} lançamentos do arquivo importado?`;
+            if (avisos.length) {
+                mensagemConfirmacao += `\n\nATENÇÃO: foram detectadas ${avisos.length} data(s) suspeita(s). Exemplo:\n${avisos.slice(0, 3).join('\n')}\n\nOs dados serão preservados exatamente como estão no backup.`;
+            }
+
+            if (!confirm(mensagemConfirmacao)) return;
+
+            listaGastos = normalizados;
+            salvarLocal();
+            popularSelects();
+            popularFiltroAnos();
+            carregarTabela();
+            limparFormulario();
+            alert('Dados importados com sucesso!');
+        } catch (err) {
+            console.error(err);
+            alert('Erro ao ler o arquivo JSON.');
+        } finally {
+            event.target.value = '';
+        }
+    };
+    reader.readAsText(file);
+}

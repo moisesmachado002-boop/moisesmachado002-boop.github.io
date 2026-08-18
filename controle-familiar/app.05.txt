@@ -1,0 +1,382 @@
+(async () => {
+    const FAMILY_CLOUD_TABLE = 'family_finance_state';
+    const FAMILY_CLOUD_META_KEY = 'dadosFinanceirosFamiliaresCloudMeta';
+    const FAMILY_SUPABASE_URL = 'https://pqcltcegwmyuzytivakt.supabase.co';
+    const FAMILY_SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_3B61vWHjC_Qu3ksO0GJVXA_d_ytJyop';
+    const FAMILY_AUTH_STORAGE_KEY = 'family-finance-auth-pqcltcegwmyuzytivakt';
+
+    let client = null;
+    let currentUser = null;
+    let saveTimer = null;
+    let pollTimer = null;
+    let syncing = false;
+    let lastObservedLocal = localStorage.getItem(STORAGE_KEY) || '[]';
+
+    inserirPainelNuvem();
+    setCloudStatus('Modo local', 'local');
+
+    try {
+        await garantirSupabase();
+        if (!window.supabase?.createClient) throw new Error('Biblioteca Supabase indisponível');
+
+        client = window.supabase.createClient(FAMILY_SUPABASE_URL, FAMILY_SUPABASE_PUBLISHABLE_KEY, {
+            auth: {
+                storageKey: FAMILY_AUTH_STORAGE_KEY,
+                storage: window.localStorage,
+                persistSession: true,
+                autoRefreshToken: true,
+                detectSessionInUrl: false
+            }
+        });
+
+        ligarEventosNuvem();
+        const { data, error } = await client.auth.getSession();
+        if (error) throw error;
+
+        if (data?.session?.user) {
+            const { data: userData, error: userError } = await client.auth.getUser();
+            if (userError) throw userError;
+            if (userData?.user) await ativarUsuarioNuvem(userData.user);
+            else mostrarCloudDeslogado();
+        } else {
+            mostrarCloudDeslogado();
+        }
+
+        client.auth.onAuthStateChange((event, session) => {
+            setTimeout(() => {
+                if (event === 'SIGNED_OUT') desativarUsuarioNuvem();
+                else if (session?.user && session.user.id !== currentUser?.id) ativarUsuarioNuvem(session.user);
+            }, 0);
+        });
+    } catch (erro) {
+        console.warn('Sincronização online indisponível:', erro);
+        setCloudStatus('Somente local', 'offline');
+        setCloudMessage('A nuvem não foi carregada. Seus dados continuam salvos neste navegador e podem ser exportados em JSON.');
+    }
+
+    function garantirSupabase() {
+        if (window.supabase?.createClient) return Promise.resolve();
+        return new Promise((resolve, reject) => {
+            const script = document.createElement('script');
+            script.src = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2';
+            script.onload = resolve;
+            script.onerror = () => reject(new Error('Falha ao carregar Supabase'));
+            document.head.appendChild(script);
+        });
+    }
+
+    function inserirPainelNuvem() {
+        if (document.getElementById('familyCloudPanel')) return;
+        const referencia = document.querySelector('.actions-footer');
+        if (!referencia) return;
+
+        const section = document.createElement('section');
+        section.id = 'familyCloudPanel';
+        section.className = 'cloud-panel';
+        section.innerHTML = `
+            <div class="cloud-head">
+                <div>
+                    <h3>Sincronização online</h3>
+                    <p id="familyCloudMessage">Seus lançamentos continuam funcionando localmente mesmo sem internet.</p>
+                </div>
+                <span id="familyCloudStatus" class="cloud-status">Modo local</span>
+            </div>
+            <div id="familyCloudAuth" class="cloud-auth">
+                <input id="familyCloudEmail" type="email" autocomplete="email" placeholder="Seu e-mail">
+                <input id="familyCloudPassword" type="password" autocomplete="current-password" placeholder="Senha (mín. 6 caracteres)">
+                <button id="familyCloudLogin" type="button" class="btn-secondary">Entrar</button>
+                <button id="familyCloudSignup" type="button" class="btn-secondary">Criar conta</button>
+            </div>
+            <div id="familyCloudUser" class="cloud-user" hidden>
+                <span id="familyCloudUserEmail"></span>
+                <button id="familyCloudSync" type="button" class="btn-secondary">Sincronizar agora</button>
+                <button id="familyCloudLogout" type="button" class="btn-secondary">Sair</button>
+            </div>
+        `;
+        referencia.insertAdjacentElement('beforebegin', section);
+    }
+
+    function ligarEventosNuvem() {
+        document.getElementById('familyCloudLogin')?.addEventListener('click', loginCloud);
+        document.getElementById('familyCloudSignup')?.addEventListener('click', signupCloud);
+        document.getElementById('familyCloudSync')?.addEventListener('click', () => sincronizarAgora(true));
+        document.getElementById('familyCloudLogout')?.addEventListener('click', logoutCloud);
+        window.addEventListener('online', () => {
+            if (currentUser) sincronizarAgora(false);
+        });
+        window.addEventListener('offline', () => setCloudStatus('Sem internet', 'offline'));
+    }
+
+    function setCloudStatus(texto, classe = '') {
+        const el = document.getElementById('familyCloudStatus');
+        if (!el) return;
+        el.textContent = texto;
+        el.className = `cloud-status${classe ? ` ${classe}` : ''}`;
+    }
+
+    function setCloudMessage(texto) {
+        const el = document.getElementById('familyCloudMessage');
+        if (el) el.textContent = texto;
+    }
+
+    function mostrarCloudDeslogado() {
+        document.getElementById('familyCloudAuth').hidden = false;
+        document.getElementById('familyCloudUser').hidden = true;
+        setCloudStatus('Não conectado', 'local');
+        setCloudMessage('Entre para sincronizar esta Gestão Familiar sem misturar os dados com o Meu Financeiro.');
+    }
+
+    function mostrarCloudLogado(user) {
+        document.getElementById('familyCloudAuth').hidden = true;
+        document.getElementById('familyCloudUser').hidden = false;
+        document.getElementById('familyCloudUserEmail').textContent = user.email || 'Conta conectada';
+    }
+
+    function cloudCredentials() {
+        return {
+            email: String(document.getElementById('familyCloudEmail')?.value || '').trim(),
+            password: String(document.getElementById('familyCloudPassword')?.value || '')
+        };
+    }
+
+    async function loginCloud() {
+        if (!client) return;
+        const { email, password } = cloudCredentials();
+        if (!email || password.length < 6) {
+            setCloudMessage('Informe um e-mail válido e uma senha com pelo menos 6 caracteres.');
+            return;
+        }
+        setCloudStatus('Entrando...', 'syncing');
+        const { data, error } = await client.auth.signInWithPassword({ email, password });
+        if (error) {
+            setCloudStatus('Falha no login', 'error');
+            setCloudMessage(friendlyCloudError(error));
+            return;
+        }
+        if (data?.user) await ativarUsuarioNuvem(data.user);
+    }
+
+    async function signupCloud() {
+        if (!client) return;
+        const { email, password } = cloudCredentials();
+        if (!email || password.length < 6) {
+            setCloudMessage('Informe um e-mail válido e uma senha com pelo menos 6 caracteres.');
+            return;
+        }
+        setCloudStatus('Criando conta...', 'syncing');
+        const { data, error } = await client.auth.signUp({ email, password });
+        if (error) {
+            setCloudStatus('Falha no cadastro', 'error');
+            setCloudMessage(friendlyCloudError(error));
+            return;
+        }
+        if (data?.session?.user) await ativarUsuarioNuvem(data.session.user);
+        else {
+            setCloudStatus('Confirme o e-mail', 'local');
+            setCloudMessage('Conta criada. Confirme o e-mail enviado pelo Supabase e depois use Entrar.');
+        }
+    }
+
+    async function logoutCloud() {
+        if (!client) return;
+        await pushCloud(true).catch(() => {});
+        await client.auth.signOut({ scope: 'local' });
+        desativarUsuarioNuvem();
+    }
+
+    function friendlyCloudError(error) {
+        const texto = String(error?.message || error || 'Erro desconhecido');
+        const lower = texto.toLowerCase();
+        if (lower.includes('invalid login credentials')) return 'E-mail ou senha incorretos.';
+        if (lower.includes('email not confirmed')) return 'Confirme seu e-mail antes de entrar.';
+        if (lower.includes('user already registered')) return 'Já existe uma conta com esse e-mail.';
+        if (lower.includes('relation') && lower.includes(FAMILY_CLOUD_TABLE)) return 'A tabela da Gestão Familiar ainda não foi criada no Supabase.';
+        return texto;
+    }
+
+    function cloudMetaKey() {
+        return currentUser ? `${FAMILY_CLOUD_META_KEY}_${currentUser.id}` : FAMILY_CLOUD_META_KEY;
+    }
+
+    function lerCloudMeta() {
+        try {
+            return JSON.parse(localStorage.getItem(cloudMetaKey()) || '{}');
+        } catch {
+            return {};
+        }
+    }
+
+    function salvarCloudMeta(patch) {
+        const meta = { ...lerCloudMeta(), ...patch };
+        localStorage.setItem(cloudMetaKey(), JSON.stringify(meta));
+        return meta;
+    }
+
+    function payloadLocal() {
+        return {
+            version: '2.2.0',
+            gastos: listaGastos.map(normalizarGasto)
+        };
+    }
+
+    function temDadosLocais() {
+        return Array.isArray(listaGastos) && listaGastos.length > 0;
+    }
+
+    function normalizarPayloadCloud(data) {
+        if (Array.isArray(data)) return data.map(normalizarGasto);
+        if (data && Array.isArray(data.gastos)) return data.gastos.map(normalizarGasto);
+        return [];
+    }
+
+    async function ativarUsuarioNuvem(user) {
+        currentUser = user;
+        mostrarCloudLogado(user);
+        setCloudStatus('Sincronizando...', 'syncing');
+        setCloudMessage('Verificando os dados locais e da nuvem...');
+
+        const remote = await buscarCloudRow();
+        if (remote.error) {
+            tratarErroTabela(remote.error);
+            iniciarObservacaoLocal();
+            return;
+        }
+
+        const remoteGastos = remote.data?.data ? normalizarPayloadCloud(remote.data.data) : [];
+        const temRemote = Boolean(remote.data?.data);
+        const meta = lerCloudMeta();
+
+        if (temRemote && temDadosLocais() && !meta.lastSyncedAt) {
+            const usarLocal = confirm(
+                'Existem dados neste aparelho e também na nuvem.\n\n' +
+                'OK = manter os dados DESTE APARELHO e enviar para a nuvem.\n' +
+                'Cancelar = usar os dados DA NUVEM neste aparelho.'
+            );
+            if (usarLocal) await pushCloud(true);
+            else aplicarCloudLocal(remoteGastos, remote.data.updated_at);
+        } else if (temRemote && !temDadosLocais()) {
+            aplicarCloudLocal(remoteGastos, remote.data.updated_at);
+        } else if (!temRemote) {
+            await pushCloud(true);
+        } else if (temRemote) {
+            const localUpdated = Date.parse(meta.updatedAt || '') || 0;
+            const remoteUpdated = Date.parse(remote.data.updated_at || '') || 0;
+            if (localUpdated > remoteUpdated) await pushCloud(true);
+            else if (remoteUpdated > localUpdated) aplicarCloudLocal(remoteGastos, remote.data.updated_at);
+            else setCloudStatus('Sincronizado', 'synced');
+        }
+
+        iniciarObservacaoLocal();
+        setCloudMessage('Dados familiares sincronizados em uma área separada do Meu Financeiro.');
+    }
+
+    function desativarUsuarioNuvem() {
+        currentUser = null;
+        clearTimeout(saveTimer);
+        clearInterval(pollTimer);
+        pollTimer = null;
+        mostrarCloudDeslogado();
+    }
+
+    async function buscarCloudRow() {
+        try {
+            const { data, error } = await client
+                .from(FAMILY_CLOUD_TABLE)
+                .select('data, updated_at')
+                .eq('user_id', currentUser.id)
+                .maybeSingle();
+            return { data, error };
+        } catch (error) {
+            return { data: null, error };
+        }
+    }
+
+    async function pushCloud(force = false) {
+        if (!client || !currentUser || syncing) return;
+        if (!navigator.onLine) {
+            setCloudStatus('Sem internet', 'offline');
+            return;
+        }
+        if (!force) {
+            const raw = localStorage.getItem(STORAGE_KEY) || '[]';
+            if (raw === lastObservedLocal) return;
+        }
+
+        syncing = true;
+        setCloudStatus('Salvando...', 'syncing');
+        try {
+            const { error } = await client
+                .from(FAMILY_CLOUD_TABLE)
+                .upsert({ user_id: currentUser.id, data: payloadLocal() }, { onConflict: 'user_id' });
+            if (error) throw error;
+            const agora = new Date().toISOString();
+            lastObservedLocal = localStorage.getItem(STORAGE_KEY) || '[]';
+            salvarCloudMeta({ updatedAt: agora, lastSyncedAt: agora, userId: currentUser.id });
+            setCloudStatus('Sincronizado', 'synced');
+        } catch (error) {
+            tratarErroTabela(error);
+        } finally {
+            syncing = false;
+        }
+    }
+
+    function aplicarCloudLocal(gastos, remoteUpdatedAt) {
+        listaGastos = gastos.map(normalizarGasto);
+        salvarLocal();
+        lastObservedLocal = localStorage.getItem(STORAGE_KEY) || '[]';
+        salvarCloudMeta({
+            updatedAt: remoteUpdatedAt || new Date().toISOString(),
+            lastSyncedAt: new Date().toISOString(),
+            userId: currentUser?.id || null
+        });
+        popularSelects();
+        popularFiltroAnos();
+        popularFiltroCompetencias();
+        carregarTabela();
+        renderAvisoLegado();
+        setCloudStatus('Sincronizado', 'synced');
+    }
+
+    function tratarErroTabela(error) {
+        console.error('Erro na nuvem familiar:', error);
+        const texto = friendlyCloudError(error);
+        setCloudStatus('Nuvem indisponível', 'error');
+        setCloudMessage(`${texto} Seus dados locais continuam preservados.`);
+    }
+
+    function iniciarObservacaoLocal() {
+        clearInterval(pollTimer);
+        lastObservedLocal = localStorage.getItem(STORAGE_KEY) || '[]';
+        pollTimer = setInterval(() => {
+            const atual = localStorage.getItem(STORAGE_KEY) || '[]';
+            if (atual === lastObservedLocal) return;
+            lastObservedLocal = atual;
+            salvarCloudMeta({ updatedAt: new Date().toISOString(), userId: currentUser?.id || null });
+            clearTimeout(saveTimer);
+            saveTimer = setTimeout(() => pushCloud(true), 700);
+        }, 1000);
+    }
+
+    async function sincronizarAgora(mostrarMensagem) {
+        if (!currentUser) return;
+        if (!navigator.onLine) {
+            setCloudStatus('Sem internet', 'offline');
+            if (mostrarMensagem) setCloudMessage('Sem internet. Os dados continuam salvos localmente.');
+            return;
+        }
+
+        const remote = await buscarCloudRow();
+        if (remote.error) return tratarErroTabela(remote.error);
+        if (!remote.data?.data) {
+            await pushCloud(true);
+            return;
+        }
+
+        const meta = lerCloudMeta();
+        const localUpdated = Date.parse(meta.updatedAt || '') || 0;
+        const remoteUpdated = Date.parse(remote.data.updated_at || '') || 0;
+        if (remoteUpdated > localUpdated) aplicarCloudLocal(normalizarPayloadCloud(remote.data.data), remote.data.updated_at);
+        else await pushCloud(true);
+        if (mostrarMensagem) setCloudMessage('Sincronização concluída.');
+    }
+})();

@@ -1,0 +1,360 @@
+const STORAGE_KEY = "dadosFinanceirosPadrao";
+const pessoasBase = ["Moisés", "Sabrina", "Marinalva", "Ailton", "Nique"];
+const cartoesBase = ["NUBANK-1", "NUBANK-2", "PICPAY", "DIGIO", "NEON"];
+const nomesMeses = {
+    "01": "Janeiro", "02": "Fevereiro", "03": "Março", "04": "Abril",
+    "05": "Maio", "06": "Junho", "07": "Julho", "08": "Agosto",
+    "09": "Setembro", "10": "Outubro", "11": "Novembro", "12": "Dezembro"
+};
+
+let listaGastos = carregarDadosLocais();
+
+inicializarAplicacao();
+
+function inicializarAplicacao() {
+    definirDataHoje();
+    popularSelects();
+    popularFiltroAnos();
+    carregarTabela();
+    configurarTeclado();
+    window.addEventListener('afterprint', limparRelatorioImpressao);
+}
+
+function gerarId() {
+    if (window.crypto && typeof window.crypto.randomUUID === 'function') {
+        return window.crypto.randomUUID();
+    }
+    return `gasto-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function carregarDadosLocais() {
+    try {
+        const bruto = localStorage.getItem(STORAGE_KEY);
+        if (!bruto) return [];
+
+        const dados = JSON.parse(bruto);
+        if (!Array.isArray(dados)) {
+            console.warn('Os dados locais não estão no formato esperado.');
+            return [];
+        }
+
+        let houveMigracao = false;
+        const idsUsados = new Set();
+        const normalizados = dados.map(g => {
+            const normalizado = normalizarGasto(g);
+            if (!normalizado.id || idsUsados.has(normalizado.id)) {
+                normalizado.id = gerarId();
+                houveMigracao = true;
+            }
+            idsUsados.add(normalizado.id);
+            if (!g || !g.id) houveMigracao = true;
+            return normalizado;
+        });
+
+        if (houveMigracao) salvarLocal(normalizados);
+        return normalizados;
+    } catch (erro) {
+        console.error('Erro ao carregar os dados locais:', erro);
+        return [];
+    }
+}
+
+function normalizarGasto(g = {}) {
+    return {
+        ...g,
+        id: typeof g.id === 'string' && g.id.trim() ? g.id.trim() : '',
+        desc: typeof g.desc === 'string' ? g.desc.trim() : '',
+        data: typeof g.data === 'string' ? g.data : '',
+        mesFatura: typeof g.mesFatura === 'string' ? g.mesFatura.padStart(2, '0') : '',
+        valor: Number(g.valor),
+        p: typeof g.p === 'string' ? g.p.trim() : '',
+        c: typeof g.c === 'string' ? g.c.trim() : ''
+    };
+}
+
+function salvarLocal(dados = listaGastos) {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(dados));
+}
+
+function dataLocalISO(data = new Date()) {
+    const ano = data.getFullYear();
+    const mes = String(data.getMonth() + 1).padStart(2, '0');
+    const dia = String(data.getDate()).padStart(2, '0');
+    return `${ano}-${mes}-${dia}`;
+}
+
+function definirDataHoje() {
+    const hoje = new Date();
+    document.getElementById('data').value = dataLocalISO(hoje);
+    document.getElementById('mesFatura').value = String(hoje.getMonth() + 1).padStart(2, '0');
+}
+
+function valoresUnicos(base, campo) {
+    const adicionais = listaGastos
+        .map(g => g[campo])
+        .filter(v => typeof v === 'string' && v.trim());
+    return [...new Set([...base, ...adicionais])];
+}
+
+function popularSelects() {
+    const selectPessoa = document.getElementById('pessoa');
+    const selectCartao = document.getElementById('cartao');
+    const pessoaAtual = selectPessoa.value;
+    const cartaoAtual = selectCartao.value;
+
+    const pessoas = valoresUnicos(pessoasBase, 'p');
+    const cartoes = valoresUnicos(cartoesBase, 'c');
+
+    selectPessoa.innerHTML = pessoas.map(p => `<option>${escapeHTML(p)}</option>`).join('');
+    selectCartao.innerHTML = cartoes.map(c => `<option>${escapeHTML(c)}</option>`).join('');
+
+    if (pessoaAtual && pessoas.includes(pessoaAtual)) selectPessoa.value = pessoaAtual;
+    if (cartaoAtual && cartoes.includes(cartaoAtual)) selectCartao.value = cartaoAtual;
+}
+
+function popularFiltroAnos() {
+    const filtroAno = document.getElementById('filtroAno');
+    const valorAtual = filtroAno.value;
+    const anoAtual = new Date().getFullYear();
+    const anos = new Set([anoAtual - 1, anoAtual, anoAtual + 1]);
+
+    listaGastos.forEach(g => {
+        const match = /^(\d{4})-\d{2}-\d{2}$/.exec(g.data || '');
+        if (match) {
+            const ano = Number(match[1]);
+            if (ano >= 2000 && ano <= 2100) anos.add(ano);
+        }
+    });
+
+    const opcoes = [...anos].sort((a, b) => b - a);
+    filtroAno.innerHTML = '<option value="">Todos os Anos</option>' +
+        opcoes.map(ano => `<option value="${ano}">${ano}</option>`).join('');
+
+    if (valorAtual && opcoes.map(String).includes(valorAtual)) filtroAno.value = valorAtual;
+}
+
+function configurarTeclado() {
+    const campos = document.querySelectorAll('.campo-teclado');
+    campos.forEach(campo => {
+        campo.addEventListener('keydown', function(event) {
+            if (event.key !== 'Enter') return;
+
+            event.preventDefault();
+            const nextId = this.getAttribute('data-next');
+            const nextElement = document.getElementById(nextId);
+            if (!nextElement) return;
+
+            nextElement.focus();
+            if (nextElement.tagName === 'INPUT' && nextElement.type === 'text') {
+                nextElement.select();
+            }
+        });
+    });
+}
+
+function escapeHTML(texto) {
+    if (texto === null || texto === undefined) return '';
+    return texto.toString()
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+}
+
+function formatarMoeda(valor) {
+    const numero = Number(valor) || 0;
+    return numero.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+}
+
+function formatarData(dataIso) {
+    if (!dataIso) return '';
+    const partes = dataIso.split('-');
+    if (partes.length === 3) return `${partes[2]}/${partes[1]}/${partes[0]}`;
+    return dataIso;
+}
+
+function filtrosAtivos() {
+    return Boolean(
+        document.getElementById('inputPesquisa').value.trim() ||
+        document.getElementById('filtroMes').value ||
+        document.getElementById('filtroFatura').value ||
+        document.getElementById('filtroAno').value
+    );
+}
+
+function filtrarGastos() {
+    const termo = document.getElementById('inputPesquisa').value.toLowerCase().trim();
+    const mesFiltro = document.getElementById('filtroMes').value;
+    const faturaFiltro = document.getElementById('filtroFatura').value;
+    const anoFiltro = document.getElementById('filtroAno').value;
+
+    return listaGastos.filter(g => {
+        const desc = String(g.desc || '').toLowerCase();
+        const partesData = String(g.data || '').split('-');
+        const anoGasto = partesData[0] || '';
+        const mesGasto = partesData[1] || '';
+
+        const matchDesc = desc.includes(termo);
+        const matchMes = !mesFiltro || mesGasto === mesFiltro;
+        const matchFatura = !faturaFiltro || g.mesFatura === faturaFiltro;
+        const matchAno = !anoFiltro || anoGasto === anoFiltro;
+        return matchDesc && matchMes && matchFatura && matchAno;
+    });
+}
+
+function carregarTabela() {
+    const gastosFiltrados = filtrarGastos();
+    const corpo = document.getElementById('corpoTabela');
+    corpo.innerHTML = '';
+
+    if (gastosFiltrados.length === 0) {
+        corpo.innerHTML = '<tr><td colspan="7" class="empty-state">Nenhum gasto encontrado.</td></tr>';
+        atualizarTotais(gastosFiltrados);
+        return;
+    }
+
+    const gastosParaExibir = [...gastosFiltrados].reverse();
+    let html = '';
+
+    gastosParaExibir.forEach(g => {
+        const nomeMesFatura = nomesMeses[g.mesFatura] || g.mesFatura;
+        const idSeguro = encodeURIComponent(g.id);
+        html += `<tr>
+            <td>${escapeHTML(g.desc)}</td>
+            <td>${formatarData(g.data)}</td>
+            <td><strong>${escapeHTML(nomeMesFatura)}</strong></td>
+            <td>${formatarMoeda(g.valor)}</td>
+            <td><strong>${escapeHTML(g.p)}</strong></td>
+            <td>${escapeHTML(g.c)}</td>
+            <td style="text-align: center;">
+                <button class="btn-edit" onclick="prepararEdicao(decodeURIComponent('${idSeguro}'))">Editar</button>
+                <button class="btn-del" onclick="removerGasto(decodeURIComponent('${idSeguro}'))">Excluir</button>
+            </td>
+        </tr>`;
+    });
+
+    corpo.innerHTML = html;
+    atualizarTotais(gastosFiltrados);
+}
+
+function atualizarTotais(gastos) {
+    let totalGeral = 0;
+    const pessoas = valoresUnicos(pessoasBase, 'p');
+    const cartoes = valoresUnicos(cartoesBase, 'c');
+    const totaisDono = Object.fromEntries(pessoas.map(p => [p, 0]));
+    const totaisCartao = Object.fromEntries(cartoes.map(c => [c, 0]));
+
+    gastos.forEach(g => {
+        const valor = Number(g.valor) || 0;
+        totalGeral += valor;
+        totaisDono[g.p] = (totaisDono[g.p] || 0) + valor;
+        totaisCartao[g.c] = (totaisCartao[g.c] || 0) + valor;
+    });
+
+    const mostrarZeros = !filtrosAtivos();
+    let dashboardHTML = `<div class="card-total geral"><div class="card-total-title">Total Geral</div><div class="card-total-value">${formatarMoeda(totalGeral)}</div></div>`;
+
+    Object.keys(totaisDono).forEach(dono => {
+        if (totaisDono[dono] > 0 || mostrarZeros) {
+            dashboardHTML += `<div class="card-total"><div class="card-total-title">${escapeHTML(dono)}</div><div class="card-total-value">${formatarMoeda(totaisDono[dono])}</div></div>`;
+        }
+    });
+
+    Object.keys(totaisCartao).forEach(cartao => {
+        if (totaisCartao[cartao] > 0 || mostrarZeros) {
+            dashboardHTML += `<div class="card-total" style="border-left-color: #d97706;"><div class="card-total-title">Cartão: ${escapeHTML(cartao)}</div><div class="card-total-value">${formatarMoeda(totaisCartao[cartao])}</div></div>`;
+        }
+    });
+
+    document.getElementById('totaisDashboard').innerHTML = dashboardHTML;
+}
+
+function salvarGasto() {
+    const desc = document.getElementById('descricao').value.trim();
+    const dataIso = document.getElementById('data').value;
+    const mesFatura = document.getElementById('mesFatura').value;
+    const valor = Number(document.getElementById('valor').value);
+    const p = document.getElementById('pessoa').value;
+    const c = document.getElementById('cartao').value;
+    const editId = document.getElementById('editId').value;
+
+    if (!desc || !Number.isFinite(valor) || valor <= 0 || !dataIso) {
+        alert('Por favor, preencha a descrição, data e um valor maior que zero!');
+        return;
+    }
+
+    if (editId === '') {
+        listaGastos.push({ id: gerarId(), desc, data: dataIso, mesFatura, valor, p, c });
+    } else {
+        const index = listaGastos.findIndex(g => g.id === editId);
+        if (index === -1) {
+            alert('Este lançamento não foi encontrado. A edição foi cancelada para evitar alterar outro gasto.');
+            cancelarEdicao();
+            return;
+        }
+        listaGastos[index] = { ...listaGastos[index], desc, data: dataIso, mesFatura, valor, p, c };
+    }
+
+    salvarLocal();
+    popularFiltroAnos();
+    carregarTabela();
+    limparFormulario();
+}
+
+function prepararEdicao(id) {
+    const g = listaGastos.find(item => item.id === id);
+    if (!g) {
+        alert('Lançamento não encontrado.');
+        carregarTabela();
+        return;
+    }
+
+    popularSelects();
+    document.getElementById('descricao').value = g.desc;
+    document.getElementById('data').value = g.data;
+    document.getElementById('mesFatura').value = g.mesFatura || '01';
+    document.getElementById('valor').value = g.valor;
+    document.getElementById('pessoa').value = g.p;
+    document.getElementById('cartao').value = g.c;
+    document.getElementById('editId').value = g.id;
+    document.getElementById('btnAdicionar').innerText = 'Atualizar Gasto';
+    document.getElementById('btnCancelarEdicao').hidden = false;
+    document.getElementById('descricao').focus();
+}
+
+function cancelarEdicao() {
+    limparFormulario();
+}
+
+function removerGasto(id) {
+    const index = listaGastos.findIndex(g => g.id === id);
+    if (index === -1) {
+        alert('Lançamento não encontrado.');
+        carregarTabela();
+        return;
+    }
+
+    if (!confirm('Deseja realmente excluir este gasto?')) return;
+
+    listaGastos.splice(index, 1);
+    salvarLocal();
+
+    if (document.getElementById('editId').value === id) {
+        limparFormulario();
+    }
+
+    popularSelects();
+    popularFiltroAnos();
+    carregarTabela();
+}
+
+function limparFormulario() {
+    document.getElementById('descricao').value = '';
+    document.getElementById('valor').value = '';
+    document.getElementById('editId').value = '';
+    document.getElementById('btnAdicionar').innerText = 'Adicionar Gasto';
+    document.getElementById('btnCancelarEdicao').hidden = true;
+    definirDataHoje();
+    document.getElementById('descricao').focus();
+}
