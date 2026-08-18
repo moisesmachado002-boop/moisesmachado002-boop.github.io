@@ -4,7 +4,7 @@
 
   const bodyParts = ["body.01.txt"];
   const styleParts = ["style.01.txt"];
-  const appParts = ["app.01.txt"];
+  const appParts = ["app.01.txt", "app.02.txt"];
 
   const versioned = p => `${p}?v=${VERSION}`;
 
