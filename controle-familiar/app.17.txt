@@ -1,0 +1,473 @@
+/* v2.8.0 - limite, fechamento e vencimento dos cartões */
+
+const FAMILY_CARD_SETTINGS_KEY = 'family-finance-card-settings-v1';
+const FAMILY_CARD_SETTINGS_IDB_KEY = 'card-settings';
+let familyCardSettings = familyCardLoadLocal();
+let familyCardSettingsSyncing = false;
+let familyCardEditingName = '';
+
+function familyCardNormalizeDay(value) {
+    if (value === null || value === undefined || value === '') return null;
+    const n = Number(value);
+    if (!Number.isInteger(n) || n < 1 || n > 31) return null;
+    return n;
+}
+
+function familyCardNormalizeEntry(entry) {
+    const source = entry && typeof entry === 'object' ? entry : {};
+    const rawLimit = source.limitCents;
+    const limitCents = rawLimit === null || rawLimit === undefined || rawLimit === ''
+        ? null
+        : Math.max(0, Math.round(Number(rawLimit) || 0));
+    return {
+        limitCents,
+        closingDay: familyCardNormalizeDay(source.closingDay),
+        dueDay: familyCardNormalizeDay(source.dueDay),
+        deleted: Boolean(source.deleted),
+        updatedAt: typeof source.updatedAt === 'string' && source.updatedAt
+            ? source.updatedAt
+            : new Date(0).toISOString()
+    };
+}
+
+function familyCardNormalizeMap(raw) {
+    const source = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+    const out = {};
+    Object.entries(source).forEach(([name, entry]) => {
+        const clean = limparNomeCatalogo(name);
+        if (!clean) return;
+        out[clean] = familyCardNormalizeEntry(entry);
+    });
+    return out;
+}
+
+function familyCardLoadLocal() {
+    try {
+        return familyCardNormalizeMap(JSON.parse(localStorage.getItem(FAMILY_CARD_SETTINGS_KEY) || '{}'));
+    } catch {
+        return {};
+    }
+}
+
+function familyCardLatestUpdatedAt(map = familyCardSettings) {
+    let latest = 0;
+    Object.values(map).forEach(entry => {
+        const t = Date.parse(entry?.updatedAt || '') || 0;
+        if (t > latest) latest = t;
+    });
+    return latest ? new Date(latest).toISOString() : null;
+}
+
+function familyCardMergeMaps(localMap, remoteMap) {
+    const local = familyCardNormalizeMap(localMap);
+    const remote = familyCardNormalizeMap(remoteMap);
+    const keys = new Set([...Object.keys(local), ...Object.keys(remote)]);
+    const merged = {};
+
+    keys.forEach(key => {
+        const a = local[key];
+        const b = remote[key];
+        if (!a) return void (merged[key] = b);
+        if (!b) return void (merged[key] = a);
+        const at = Date.parse(a.updatedAt || '') || 0;
+        const bt = Date.parse(b.updatedAt || '') || 0;
+        merged[key] = at >= bt ? a : b;
+    });
+
+    return merged;
+}
+
+function familyCardMapEqual(a, b) {
+    try {
+        const sort = obj => Object.fromEntries(
+            Object.entries(familyCardNormalizeMap(obj)).sort(([ka], [kb]) => ka.localeCompare(kb))
+        );
+        return JSON.stringify(sort(a)) === JSON.stringify(sort(b));
+    } catch {
+        return false;
+    }
+}
+
+async function familyCardSaveIndexedDB() {
+    if (typeof familyIdbAbrir !== 'function') return;
+    const db = await familyIdbAbrir();
+    try {
+        await new Promise((resolve, reject) => {
+            const tx = db.transaction(FAMILY_IDB_STORE, 'readwrite');
+            tx.objectStore(FAMILY_IDB_STORE).put({
+                settings: familyCardSettings,
+                updatedAt: familyCardLatestUpdatedAt()
+            }, FAMILY_CARD_SETTINGS_IDB_KEY);
+            tx.oncomplete = resolve;
+            tx.onerror = () => reject(tx.error || new Error('Falha ao salvar dados dos cartões'));
+            tx.onabort = () => reject(tx.error || new Error('Gravação dos cartões cancelada'));
+        });
+    } finally {
+        db.close();
+    }
+}
+
+async function familyCardReadIndexedDB() {
+    if (typeof familyIdbAbrir !== 'function') return {};
+    const db = await familyIdbAbrir();
+    try {
+        return await new Promise((resolve, reject) => {
+            const tx = db.transaction(FAMILY_IDB_STORE, 'readonly');
+            const request = tx.objectStore(FAMILY_IDB_STORE).get(FAMILY_CARD_SETTINGS_IDB_KEY);
+            request.onsuccess = () => resolve(familyCardNormalizeMap(request.result?.settings || {}));
+            request.onerror = () => reject(request.error || new Error('Falha ao ler dados dos cartões'));
+        });
+    } finally {
+        db.close();
+    }
+}
+
+async function familyCardReconcileIndexedDB() {
+    try {
+        const idb = await familyCardReadIndexedDB();
+        const merged = familyCardMergeMaps(familyCardSettings, idb);
+        if (!familyCardMapEqual(merged, familyCardSettings)) {
+            familyCardSettings = merged;
+            localStorage.setItem(FAMILY_CARD_SETTINGS_KEY, JSON.stringify(familyCardSettings));
+        }
+        await familyCardSaveIndexedDB().catch(() => {});
+    } catch (error) {
+        console.warn('Dados locais dos cartões indisponíveis:', error);
+    }
+}
+
+function familyCardSaveLocal({ sync = true } = {}) {
+    familyCardSettings = familyCardNormalizeMap(familyCardSettings);
+    localStorage.setItem(FAMILY_CARD_SETTINGS_KEY, JSON.stringify(familyCardSettings));
+    familyCardSaveIndexedDB().catch(() => {});
+    familyCardRefreshUI();
+    if (sync && navigator.onLine) setTimeout(() => familyCardSync(true), 120);
+}
+
+function familyCardSettingsFor(card) {
+    const entry = familyCardSettings[String(card || '')];
+    if (!entry || entry.deleted) return null;
+    return familyCardNormalizeEntry(entry);
+}
+
+function familyCardOutstandingCents(card) {
+    const totals = new Map();
+    listaGastos.forEach(gasto => {
+        if (gasto?.c !== card || !competenciaValida(gasto?.competenciaFatura)) return;
+        const current = totals.get(gasto.competenciaFatura) || 0;
+        totals.set(gasto.competenciaFatura, current + familyInvoiceToCents(gasto.valor));
+    });
+
+    let outstanding = 0;
+    totals.forEach((total, competencia) => {
+        const paid = typeof familyInvoicePaidCents === 'function'
+            ? familyInvoicePaidCents(competencia, card)
+            : 0;
+        outstanding += Math.max(total - paid, 0);
+    });
+    return outstanding;
+}
+
+function familyCardAvailableCents(card) {
+    const settings = familyCardSettingsFor(card);
+    if (!settings || settings.limitCents === null) return null;
+    return settings.limitCents - familyCardOutstandingCents(card);
+}
+
+function familyCardParseMoney(value) {
+    let text = String(value ?? '').trim();
+    if (!text) return null;
+    if (text.includes(',')) text = text.replace(/\./g, '').replace(',', '.');
+    text = text.replace(/[^\d.-]/g, '');
+    const number = Number(text);
+    return Number.isFinite(number) && number >= 0 ? Math.round(number * 100) : NaN;
+}
+
+function familyCardEnsureModal() {
+    if (document.getElementById('familyCardSettingsModal')) return;
+    const modal = document.createElement('div');
+    modal.id = 'familyCardSettingsModal';
+    modal.className = 'catalog-modal-backdrop card-settings-backdrop';
+    modal.hidden = true;
+    modal.innerHTML = `
+        <div class="catalog-modal card-settings-modal" role="dialog" aria-modal="true" aria-labelledby="familyCardSettingsTitle">
+            <div class="catalog-modal-head">
+                <div>
+                    <h3 id="familyCardSettingsTitle">Dados do cartão</h3>
+                    <p id="familyCardSettingsSubtitle"></p>
+                </div>
+                <button type="button" id="familyCardSettingsClose" class="catalog-close" aria-label="Fechar">×</button>
+            </div>
+            <div class="card-settings-grid">
+                <label>
+                    <span>Limite total</span>
+                    <input id="familyCardLimit" type="text" inputmode="decimal" placeholder="Ex.: 5.150,00">
+                </label>
+                <label>
+                    <span>Dia de fechamento</span>
+                    <input id="familyCardClosing" type="number" min="1" max="31" placeholder="Ex.: 6">
+                </label>
+                <label>
+                    <span>Dia de vencimento</span>
+                    <input id="familyCardDue" type="number" min="1" max="31" placeholder="Ex.: 12">
+                </label>
+            </div>
+            <div id="familyCardLimitPreview" class="card-limit-preview"></div>
+            <div class="card-settings-actions">
+                <button type="button" id="familyCardSettingsCancel" class="btn-secondary">Cancelar</button>
+                <button type="button" id="familyCardSettingsSave" class="btn-secondary">Salvar dados</button>
+            </div>
+        </div>`;
+    document.body.appendChild(modal);
+
+    document.getElementById('familyCardSettingsClose')?.addEventListener('click', familyCardCloseSettings);
+    document.getElementById('familyCardSettingsCancel')?.addEventListener('click', familyCardCloseSettings);
+    document.getElementById('familyCardSettingsSave')?.addEventListener('click', familyCardSaveSettingsFromModal);
+    modal.addEventListener('click', event => {
+        if (event.target === modal) familyCardCloseSettings();
+    });
+}
+
+function familyCardOpenSettings(card) {
+    familyCardEnsureModal();
+    familyCardEditingName = String(card || '');
+    const settings = familyCardSettingsFor(familyCardEditingName);
+    const modal = document.getElementById('familyCardSettingsModal');
+    if (!modal) return;
+
+    document.getElementById('familyCardSettingsSubtitle').textContent = familyCardEditingName;
+    document.getElementById('familyCardLimit').value = settings?.limitCents !== null && settings?.limitCents !== undefined
+        ? familyInvoiceFromCents(settings.limitCents).toFixed(2).replace('.', ',')
+        : '';
+    document.getElementById('familyCardClosing').value = settings?.closingDay || '';
+    document.getElementById('familyCardDue').value = settings?.dueDay || '';
+    familyCardRenderModalPreview();
+    modal.hidden = false;
+    document.getElementById('familyCardLimit')?.focus();
+}
+
+function familyCardCloseSettings() {
+    const modal = document.getElementById('familyCardSettingsModal');
+    if (modal) modal.hidden = true;
+    familyCardEditingName = '';
+}
+
+function familyCardRenderModalPreview() {
+    const box = document.getElementById('familyCardLimitPreview');
+    if (!box || !familyCardEditingName) return;
+    const settings = familyCardSettingsFor(familyCardEditingName);
+    const used = familyCardOutstandingCents(familyCardEditingName);
+    const limit = settings?.limitCents;
+
+    if (limit === null || limit === undefined) {
+        box.innerHTML = '<span>Informe o limite para acompanhar automaticamente quanto está em uso e quanto ainda está disponível.</span>';
+        return;
+    }
+
+    const available = limit - used;
+    box.innerHTML = `
+        <div><span>Em uso agora</span><strong>${formatarMoeda(familyInvoiceFromCents(used))}</strong></div>
+        <div><span>Disponível agora</span><strong>${formatarMoeda(familyInvoiceFromCents(available))}</strong></div>`;
+}
+
+function familyCardSaveSettingsFromModal() {
+    if (!familyCardEditingName) return;
+    const rawLimit = document.getElementById('familyCardLimit')?.value || '';
+    const rawClosing = document.getElementById('familyCardClosing')?.value || '';
+    const rawDue = document.getElementById('familyCardDue')?.value || '';
+    const limitCents = familyCardParseMoney(rawLimit);
+
+    if (Number.isNaN(limitCents)) {
+        alert('Informe um limite válido ou deixe o campo vazio.');
+        return;
+    }
+    const closingDay = rawClosing === '' ? null : Number(rawClosing);
+    const dueDay = rawDue === '' ? null : Number(rawDue);
+    if (closingDay !== null && (!Number.isInteger(closingDay) || closingDay < 1 || closingDay > 31)) {
+        alert('O dia de fechamento deve ficar entre 1 e 31.');
+        return;
+    }
+    if (dueDay !== null && (!Number.isInteger(dueDay) || dueDay < 1 || dueDay > 31)) {
+        alert('O dia de vencimento deve ficar entre 1 e 31.');
+        return;
+    }
+
+    familyCardSettings[familyCardEditingName] = {
+        limitCents,
+        closingDay,
+        dueDay,
+        deleted: false,
+        updatedAt: new Date().toISOString()
+    };
+    familyCardSaveLocal();
+    familyCardCloseSettings();
+}
+
+function familyCardDetailsText(card) {
+    const settings = familyCardSettingsFor(card);
+    if (!settings) return 'Limite e datas não configurados';
+    const parts = [];
+    if (settings.limitCents !== null) parts.push(`Limite ${formatarMoeda(familyInvoiceFromCents(settings.limitCents))}`);
+    if (settings.closingDay) parts.push(`fecha dia ${String(settings.closingDay).padStart(2, '0')}`);
+    if (settings.dueDay) parts.push(`vence dia ${String(settings.dueDay).padStart(2, '0')}`);
+    return parts.length ? parts.join(' • ') : 'Limite e datas não configurados';
+}
+
+function familyCardEnhanceCatalog() {
+    if (familyCatalogTipoAtual !== 'cartao') return;
+    const list = document.getElementById('familyCatalogList');
+    if (!list) return;
+
+    list.querySelectorAll('.catalog-item').forEach(item => {
+        const name = item.querySelector('.catalog-item-name strong')?.textContent?.trim() || '';
+        if (!name) return;
+
+        const nameBox = item.querySelector('.catalog-item-name');
+        if (nameBox && !nameBox.querySelector('.catalog-card-details')) {
+            const details = document.createElement('span');
+            details.className = 'catalog-card-details';
+            details.textContent = familyCardDetailsText(name);
+            nameBox.appendChild(details);
+        }
+
+        const actions = item.querySelector('.catalog-item-actions');
+        if (actions && !actions.querySelector('.catalog-config')) {
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.className = 'catalog-config';
+            button.textContent = 'Limite e datas';
+            button.addEventListener('click', () => familyCardOpenSettings(name));
+            actions.insertAdjacentElement('afterbegin', button);
+        }
+    });
+}
+
+function familyCardAugmentInvoiceCards() {
+    const grid = document.getElementById('invoicePaymentGrid');
+    if (!grid) return;
+
+    grid.querySelectorAll('.invoice-payment-card').forEach(cardEl => {
+        const cardName = cardEl.querySelector('.invoice-payment-card-head strong')?.textContent?.trim() || '';
+        if (!cardName || cardEl.querySelector('.card-credit-box')) return;
+        const settings = familyCardSettingsFor(cardName);
+        if (!settings) return;
+
+        const used = familyCardOutstandingCents(cardName);
+        const limit = settings.limitCents;
+        const available = limit === null ? null : limit - used;
+        const percent = limit && limit > 0 ? (used / limit) * 100 : 0;
+        const dates = [
+            settings.closingDay ? `Fecha dia ${String(settings.closingDay).padStart(2, '0')}` : '',
+            settings.dueDay ? `Vence dia ${String(settings.dueDay).padStart(2, '0')}` : ''
+        ].filter(Boolean).join(' • ');
+
+        const box = document.createElement('div');
+        box.className = 'card-credit-box';
+        box.innerHTML = `
+            <div class="card-credit-values">
+                <div><span>Limite</span><strong>${limit === null ? 'Não informado' : formatarMoeda(familyInvoiceFromCents(limit))}</strong></div>
+                <div><span>Em uso</span><strong>${formatarMoeda(familyInvoiceFromCents(used))}</strong></div>
+                <div><span>Disponível</span><strong class="${available !== null && available < 0 ? 'card-credit-negative' : ''}">${available === null ? '—' : formatarMoeda(familyInvoiceFromCents(available))}</strong></div>
+            </div>
+            ${limit !== null ? `<div class="card-credit-progress" aria-label="${Math.round(percent)}% do limite em uso"><span style="width:${Math.max(0, Math.min(100, percent))}%"></span></div>` : ''}
+            ${dates ? `<div class="card-credit-dates">${escapeHTML(dates)}</div>` : ''}`;
+
+        cardEl.querySelector('.invoice-payment-card-head')?.insertAdjacentElement('afterend', box);
+    });
+}
+
+function familyCardRefreshUI() {
+    try {
+        renderizarModalCatalogo();
+        familyInvoiceRenderPanel();
+    } catch (error) {
+        console.warn('Falha ao atualizar informações dos cartões:', error);
+    }
+}
+
+async function familyCardSync(silent = true) {
+    if (!navigator.onLine || !familyCatalogClient || !familyCatalogUser || familyCardSettingsSyncing) return;
+    familyCardSettingsSyncing = true;
+    try {
+        const { data: row, error } = await familyCatalogClient
+            .from(FAMILY_CATALOG_TABLE)
+            .select('card_settings, card_settings_updated_at')
+            .eq('user_id', familyCatalogUser.id)
+            .maybeSingle();
+        if (error) throw error;
+
+        const remote = familyCardNormalizeMap(row?.card_settings || {});
+        const merged = familyCardMergeMaps(familyCardSettings, remote);
+        const localChanged = !familyCardMapEqual(merged, familyCardSettings);
+        const remoteChanged = !familyCardMapEqual(merged, remote);
+
+        if (localChanged) {
+            familyCardSettings = merged;
+            localStorage.setItem(FAMILY_CARD_SETTINGS_KEY, JSON.stringify(familyCardSettings));
+            await familyCardSaveIndexedDB().catch(() => {});
+            familyCardRefreshUI();
+        }
+
+        if (remoteChanged) {
+            const latest = familyCardLatestUpdatedAt(merged) || new Date().toISOString();
+            const { error: saveError } = await familyCatalogClient
+                .from(FAMILY_CATALOG_TABLE)
+                .upsert({
+                    user_id: familyCatalogUser.id,
+                    card_settings: merged,
+                    card_settings_updated_at: latest
+                }, { onConflict: 'user_id' });
+            if (saveError) throw saveError;
+        }
+    } catch (error) {
+        if (!silent) console.warn('Falha ao sincronizar dados dos cartões:', error);
+    } finally {
+        familyCardSettingsSyncing = false;
+    }
+}
+
+const familyCardRenderCatalogOriginal = renderizarModalCatalogo;
+renderizarModalCatalogo = function() {
+    const result = familyCardRenderCatalogOriginal();
+    familyCardEnhanceCatalog();
+    return result;
+};
+
+const familyCardInvoiceRenderOriginal = familyInvoiceRenderPanel;
+familyInvoiceRenderPanel = function() {
+    const result = familyCardInvoiceRenderOriginal();
+    familyCardAugmentInvoiceCards();
+    return result;
+};
+
+const familyCardSyncCatalogOriginal = sincronizarCatalogo;
+sincronizarCatalogo = async function(silent = true) {
+    const result = await familyCardSyncCatalogOriginal(silent);
+    await familyCardSync(silent);
+    return result;
+};
+
+const familyCardRenameOriginal = renomearCatalogo;
+renomearCatalogo = function(tipo, nomeAtual) {
+    const before = tipo === 'cartao' ? [...familyCatalog.cartoes] : [];
+    const oldSettings = tipo === 'cartao' ? familyCardSettingsFor(nomeAtual) : null;
+    const result = familyCardRenameOriginal(tipo, nomeAtual);
+
+    if (tipo === 'cartao') {
+        const after = [...familyCatalog.cartoes];
+        const added = after.filter(name => !before.includes(name));
+        const removed = before.filter(name => !after.includes(name));
+        if (oldSettings && added.length === 1 && removed.length === 1 && removed[0] === nomeAtual) {
+            const now = new Date().toISOString();
+            familyCardSettings[nomeAtual] = { ...oldSettings, deleted: true, updatedAt: now };
+            familyCardSettings[added[0]] = { ...oldSettings, deleted: false, updatedAt: now };
+            familyCardSaveLocal();
+        }
+    }
+    return result;
+};
+
+familyCardEnsureModal();
+familyCardReconcileIndexedDB().then(() => familyCardRefreshUI());
+setTimeout(() => familyCardSync(true), 500);
+window.addEventListener('online', () => setTimeout(() => familyCardSync(false), 500));
