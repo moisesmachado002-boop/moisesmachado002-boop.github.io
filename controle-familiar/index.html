@@ -11,12 +11,12 @@
   <script>
     if ('serviceWorker' in navigator && location.protocol !== 'file:') {
       window.addEventListener('load', () => {
-        navigator.serviceWorker.register('./sw.js?v=2.7.0', { scope: './' })
+        navigator.serviceWorker.register('./sw.js?v=2.8.0', { scope: './' })
           .then(registration => registration.update())
           .catch(error => console.warn('Modo offline não pôde ser preparado:', error));
       });
     }
   </script>
-  <script src="loader.js?v=2.7.0"></script>
+  <script src="loader.js?v=2.8.0"></script>
 </body>
 </html>
