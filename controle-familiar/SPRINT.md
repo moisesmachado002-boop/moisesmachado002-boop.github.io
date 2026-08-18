@@ -62,7 +62,9 @@
 - [x] Inspecionar a integração Supabase já usada pelo Meu Financeiro
 - [x] Confirmar que o Meu Financeiro usa a tabela `finance_state`
 - [x] Definir tabela própria `family_finance_state` para impedir interferência entre os dois sistemas
-- [x] Manter o mesmo projeto/autenticação Supabase, mas dados familiares em tabela separada
+- [x] Manter o mesmo projeto Supabase, mas dados familiares em tabela separada
+- [x] Separar também a sessão de autenticação da Gestão Familiar com `storageKey` próprio
+- [x] Usar logout local na Gestão Familiar para não encerrar outras sessões do usuário
 - [x] Manter JSON como backup de segurança
 - [x] Manter `localStorage` como fallback quando estiver sem internet
 - [x] Criar `supabase.sql` com tabela, trigger, permissões e RLS por usuário
@@ -72,14 +74,17 @@
 - [x] Preparar sincronização automática após alterações locais
 - [x] Preparar tratamento de conflito inicial entre dados locais e dados da nuvem
 - [x] Manter metadados de sincronização separados por usuário
-- [x] Validar sintaxe de `app.05.txt`
-- [ ] Executar `supabase.sql` no projeto Supabase
-- [ ] Ligar `app.05.txt` e `style.03.txt` no `loader.js`
-- [ ] Atualizar versão para `2.2.0`
-- [ ] Testar login real
+- [x] Criar `family_finance_state` no projeto Supabase PAINEL FINANCEIRO
+- [x] Confirmar RLS ativo na tabela familiar
+- [x] Testar RLS: segundo usuário não consegue alterar dados do primeiro
+- [x] Confirmar que os testes foram revertidos e a tabela familiar voltou a 0 linhas
+- [x] Ligar `app.05.txt` e `style.03.txt` no `loader.js`
+- [x] Atualizar versão para `2.2.0`
+- [ ] Testar login real pelo navegador
 - [ ] Testar upload do backup atual para a nuvem
 - [ ] Testar alteração em um aparelho e recuperação em outro
-- [ ] Confirmar que a tabela `finance_state` do Meu Financeiro permanece inalterada
+- [ ] Confirmar no teste final que sair da Gestão Familiar não desloga o Meu Financeiro
+- [ ] Confirmar após sincronização real que a tabela `finance_state` do Meu Financeiro permanece inalterada
 
 ## Melhorias futuras
 
