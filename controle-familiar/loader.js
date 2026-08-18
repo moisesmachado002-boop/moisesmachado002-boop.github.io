@@ -1,5 +1,5 @@
 (async () => {
-  const VERSION = '2.8.4';
+  const VERSION = '2.8.5';
   window.__CONTROLE_FAMILIAR_VERSION = VERSION;
 
   const bodyParts = ["body.01.txt"];
