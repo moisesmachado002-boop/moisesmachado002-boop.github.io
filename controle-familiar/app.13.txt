@@ -1,0 +1,707 @@
+/* v2.5.0 - controle de pagamento de faturas e filtros por cartão/status */
+
+const FAMILY_INVOICE_PAYMENT_KEY = 'family-finance-invoice-payments-v1';
+const FAMILY_INVOICE_PAYMENT_IDB_KEY = 'invoice-payments';
+const FAMILY_INVOICE_PAYMENT_TABLE = 'family_finance_state';
+const FAMILY_INVOICE_PAYMENT_SUPABASE_URL = 'https://pqcltcegwmyuzytivakt.supabase.co';
+const FAMILY_INVOICE_PAYMENT_SUPABASE_KEY = 'sb_publishable_3B61vWHjC_Qu3ksO0GJVXA_d_ytJyop';
+const FAMILY_INVOICE_PAYMENT_AUTH_STORAGE_KEY = 'family-finance-auth-pqcltcegwmyuzytivakt';
+
+let familyInvoicePayments = familyInvoiceLoadLocal();
+let familyInvoicePaymentClient = null;
+let familyInvoicePaymentUser = null;
+let familyInvoicePaymentSyncing = false;
+let familyInvoicePaymentPoll = null;
+
+function familyInvoiceKey(competencia, cartao) {
+    return JSON.stringify([String(competencia || ''), String(cartao || '')]);
+}
+
+function familyInvoiceParseKey(chave) {
+    try {
+        const valor = JSON.parse(chave);
+        if (!Array.isArray(valor) || valor.length !== 2) return null;
+        const [competencia, cartao] = valor;
+        if (!competenciaValida(competencia) || !String(cartao || '').trim()) return null;
+        return { competencia, cartao: String(cartao).trim() };
+    } catch {
+        return null;
+    }
+}
+
+function familyInvoiceToCents(valor) {
+    const numero = Number(valor);
+    if (!Number.isFinite(numero)) return 0;
+    return Math.max(0, Math.round(numero * 100));
+}
+
+function familyInvoiceFromCents(centavos) {
+    return (Number(centavos) || 0) / 100;
+}
+
+function familyInvoiceNormalizeEntry(entry) {
+    const paidCents = Math.max(0, Math.round(Number(entry?.paidCents) || 0));
+    const updatedAt = typeof entry?.updatedAt === 'string' && entry.updatedAt
+        ? entry.updatedAt
+        : new Date(0).toISOString();
+    return { paidCents, updatedAt };
+}
+
+function familyInvoiceNormalizeMap(raw) {
+    const source = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+    const saida = {};
+    Object.entries(source).forEach(([chave, entry]) => {
+        if (!familyInvoiceParseKey(chave)) return;
+        saida[chave] = familyInvoiceNormalizeEntry(entry);
+    });
+    return saida;
+}
+
+function familyInvoiceLoadLocal() {
+    try {
+        return familyInvoiceNormalizeMap(JSON.parse(localStorage.getItem(FAMILY_INVOICE_PAYMENT_KEY) || '{}'));
+    } catch {
+        return {};
+    }
+}
+
+function familyInvoiceLatestUpdatedAt(map = familyInvoicePayments) {
+    let latest = 0;
+    Object.values(map).forEach(entry => {
+        const valor = Date.parse(entry?.updatedAt || '') || 0;
+        if (valor > latest) latest = valor;
+    });
+    return latest ? new Date(latest).toISOString() : null;
+}
+
+function familyInvoiceMergeMaps(localMap, remoteMap) {
+    const local = familyInvoiceNormalizeMap(localMap);
+    const remote = familyInvoiceNormalizeMap(remoteMap);
+    const chaves = new Set([...Object.keys(local), ...Object.keys(remote)]);
+    const merged = {};
+
+    chaves.forEach(chave => {
+        const a = local[chave];
+        const b = remote[chave];
+        if (!a) {
+            merged[chave] = b;
+            return;
+        }
+        if (!b) {
+            merged[chave] = a;
+            return;
+        }
+        const at = Date.parse(a.updatedAt || '') || 0;
+        const bt = Date.parse(b.updatedAt || '') || 0;
+        merged[chave] = at >= bt ? a : b;
+    });
+
+    return merged;
+}
+
+function familyInvoiceMapEqual(a, b) {
+    try {
+        const ordenar = obj => Object.fromEntries(
+            Object.entries(familyInvoiceNormalizeMap(obj)).sort(([ka], [kb]) => ka.localeCompare(kb))
+        );
+        return JSON.stringify(ordenar(a)) === JSON.stringify(ordenar(b));
+    } catch {
+        return false;
+    }
+}
+
+async function familyInvoiceSaveIndexedDB() {
+    if (typeof familyIdbAbrir !== 'function') return;
+    const db = await familyIdbAbrir();
+    try {
+        await new Promise((resolve, reject) => {
+            const tx = db.transaction(FAMILY_IDB_STORE, 'readwrite');
+            tx.objectStore(FAMILY_IDB_STORE).put({
+                payments: familyInvoicePayments,
+                updatedAt: familyInvoiceLatestUpdatedAt()
+            }, FAMILY_INVOICE_PAYMENT_IDB_KEY);
+            tx.oncomplete = resolve;
+            tx.onerror = () => reject(tx.error || new Error('Falha ao salvar pagamentos de faturas'));
+            tx.onabort = () => reject(tx.error || new Error('Gravação de pagamentos cancelada'));
+        });
+    } finally {
+        db.close();
+    }
+}
+
+async function familyInvoiceReadIndexedDB() {
+    if (typeof familyIdbAbrir !== 'function') return {};
+    const db = await familyIdbAbrir();
+    try {
+        return await new Promise((resolve, reject) => {
+            const tx = db.transaction(FAMILY_IDB_STORE, 'readonly');
+            const request = tx.objectStore(FAMILY_IDB_STORE).get(FAMILY_INVOICE_PAYMENT_IDB_KEY);
+            request.onsuccess = () => resolve(
+                familyInvoiceNormalizeMap(request.result?.payments || {})
+            );
+            request.onerror = () => reject(request.error || new Error('Falha ao ler pagamentos de faturas'));
+        });
+    } finally {
+        db.close();
+    }
+}
+
+function familyInvoiceSaveLocal({ sync = true } = {}) {
+    familyInvoicePayments = familyInvoiceNormalizeMap(familyInvoicePayments);
+    localStorage.setItem(FAMILY_INVOICE_PAYMENT_KEY, JSON.stringify(familyInvoicePayments));
+    familyInvoiceSaveIndexedDB().catch(erro => {
+        console.warn('Não foi possível atualizar a cópia local dos pagamentos:', erro);
+    });
+    familyInvoiceRefreshUI();
+    if (sync && navigator.onLine) {
+        setTimeout(() => familyInvoiceSync(false), 120);
+    }
+}
+
+async function familyInvoiceReconcileIndexedDB() {
+    try {
+        const idb = await familyInvoiceReadIndexedDB();
+        const merged = familyInvoiceMergeMaps(familyInvoicePayments, idb);
+        if (!familyInvoiceMapEqual(merged, familyInvoicePayments)) {
+            familyInvoicePayments = merged;
+            localStorage.setItem(FAMILY_INVOICE_PAYMENT_KEY, JSON.stringify(familyInvoicePayments));
+        }
+        await familyInvoiceSaveIndexedDB().catch(() => {});
+    } catch (erro) {
+        console.warn('Pagamentos locais em IndexedDB indisponíveis:', erro);
+    }
+}
+
+function familyInvoiceTotalCents(competencia, cartao) {
+    return listaGastos.reduce((total, gasto) => {
+        if (gasto?.competenciaFatura !== competencia || gasto?.c !== cartao) return total;
+        return total + familyInvoiceToCents(gasto.valor);
+    }, 0);
+}
+
+function familyInvoicePaidCents(competencia, cartao) {
+    const chave = familyInvoiceKey(competencia, cartao);
+    return Math.max(0, Number(familyInvoicePayments[chave]?.paidCents) || 0);
+}
+
+function familyInvoiceStatus(competencia, cartao) {
+    const total = familyInvoiceTotalCents(competencia, cartao);
+    if (total <= 0) return 'sem-lancamentos';
+    const pago = familyInvoicePaidCents(competencia, cartao);
+    if (pago <= 0) return 'aberta';
+    if (pago < total) return 'parcial';
+    return 'paga';
+}
+
+function familyInvoiceStatusLabel(status) {
+    if (status === 'paga') return 'Paga';
+    if (status === 'parcial') return 'Parcial';
+    if (status === 'aberta') return 'Em aberto';
+    return 'Sem lançamentos';
+}
+
+function familyInvoiceRemainingCents(competencia, cartao) {
+    return Math.max(
+        familyInvoiceTotalCents(competencia, cartao) - familyInvoicePaidCents(competencia, cartao),
+        0
+    );
+}
+
+function familyInvoiceSetPaidCents(competencia, cartao, paidCents) {
+    if (!competenciaValida(competencia) || !String(cartao || '').trim()) return;
+    const chave = familyInvoiceKey(competencia, cartao);
+    familyInvoicePayments[chave] = {
+        paidCents: Math.max(0, Math.round(Number(paidCents) || 0)),
+        updatedAt: new Date().toISOString()
+    };
+    familyInvoiceSaveLocal();
+}
+
+function familyInvoiceParseMoneyInput(valor) {
+    let texto = String(valor || '').trim();
+    if (!texto) return NaN;
+    if (texto.includes(',')) {
+        texto = texto.replace(/\./g, '').replace(',', '.');
+    }
+    texto = texto.replace(/[^\d.-]/g, '');
+    return Number(texto);
+}
+
+function familyInvoiceMarkOpen(competencia, cartao) {
+    const total = familyInvoiceTotalCents(competencia, cartao);
+    if (total <= 0) return;
+    if (!confirm(`Marcar a fatura ${cartao} — ${formatarCompetencia(competencia)} como EM ABERTO?`)) return;
+    familyInvoiceSetPaidCents(competencia, cartao, 0);
+}
+
+function familyInvoiceMarkPaid(competencia, cartao) {
+    const total = familyInvoiceTotalCents(competencia, cartao);
+    if (total <= 0) return;
+    if (!confirm(`Marcar a fatura ${cartao} — ${formatarCompetencia(competencia)} como PAGA no valor de ${formatarMoeda(familyInvoiceFromCents(total))}?`)) return;
+    familyInvoiceSetPaidCents(competencia, cartao, total);
+}
+
+function familyInvoiceMarkPartial(competencia, cartao) {
+    const total = familyInvoiceTotalCents(competencia, cartao);
+    if (total <= 0) return;
+
+    const atual = familyInvoicePaidCents(competencia, cartao);
+    const resposta = prompt(
+        `Informe o VALOR TOTAL JÁ PAGO da fatura ${cartao} — ${formatarCompetencia(competencia)}.\n\n` +
+        `Total da fatura: ${formatarMoeda(familyInvoiceFromCents(total))}\n` +
+        'Exemplo: 250,00',
+        atual > 0 ? familyInvoiceFromCents(atual).toFixed(2).replace('.', ',') : ''
+    );
+    if (resposta === null) return;
+
+    const valor = familyInvoiceParseMoneyInput(resposta);
+    const cents = familyInvoiceToCents(valor);
+
+    if (!Number.isFinite(valor) || valor <= 0) {
+        alert('Informe um valor pago maior que zero.');
+        return;
+    }
+    if (cents >= total) {
+        alert('Para um valor igual ou maior que o total da fatura, use “Paga”.');
+        return;
+    }
+
+    familyInvoiceSetPaidCents(competencia, cartao, cents);
+}
+
+function familyInvoiceCompetencias() {
+    const atual = competenciaAtualLocal();
+    return [...new Set([
+        atual,
+        ...listaGastos.map(g => g?.competenciaFatura).filter(competenciaValida)
+    ])].sort().reverse();
+}
+
+function familyInvoiceCardsForCompetencia(competencia) {
+    const ativos = typeof familyCatalog !== 'undefined' && Array.isArray(familyCatalog?.cartoes)
+        ? familyCatalog.cartoes
+        : [];
+    const historicos = listaGastos
+        .filter(g => g?.competenciaFatura === competencia && g?.c)
+        .map(g => g.c);
+    return [...new Set([...ativos, ...historicos])];
+}
+
+function familyInvoiceCreatePanel() {
+    if (document.getElementById('invoicePaymentSection')) return;
+
+    const filterBar = document.querySelector('.filter-bar');
+    if (!filterBar?.parentNode) return;
+
+    const section = document.createElement('section');
+    section.id = 'invoicePaymentSection';
+    section.className = 'invoice-payment-section';
+    section.innerHTML = `
+        <div class="invoice-payment-head">
+            <div>
+                <h3>Controle de faturas</h3>
+                <p>Confira o total de cada cartão, quanto já foi pago e quanto ainda falta.</p>
+            </div>
+            <select id="invoicePaymentCompetencia" aria-label="Mês da fatura"></select>
+        </div>
+        <div id="invoicePaymentSummary" class="invoice-payment-summary"></div>
+        <div id="invoicePaymentGrid" class="invoice-payment-grid"></div>
+    `;
+
+    filterBar.parentNode.insertBefore(section, filterBar);
+    document.getElementById('invoicePaymentCompetencia')?.addEventListener('change', () => {
+        familyInvoiceRenderPanel();
+    });
+}
+
+function familyInvoicePopulatePanelCompetencias() {
+    const select = document.getElementById('invoicePaymentCompetencia');
+    if (!select) return;
+
+    const atual = select.value;
+    const filtroFatura = document.getElementById('filtroFatura')?.value || '';
+    const competencias = familyInvoiceCompetencias();
+
+    select.innerHTML = competencias
+        .map(comp => `<option value="${comp}">${escapeHTML(formatarCompetencia(comp))}</option>`)
+        .join('');
+
+    const preferida = competenciaValida(atual)
+        ? atual
+        : (competenciaValida(filtroFatura) ? filtroFatura : competenciaAtualLocal());
+
+    if (competencias.includes(preferida)) select.value = preferida;
+    else if (competencias.length) select.value = competencias[0];
+}
+
+function familyInvoiceCreateFilters() {
+    const bar = document.querySelector('.filter-bar');
+    if (!bar) return;
+
+    if (!document.getElementById('filtroCartaoHistorico')) {
+        const selectCartao = document.createElement('select');
+        selectCartao.id = 'filtroCartaoHistorico';
+        selectCartao.setAttribute('aria-label', 'Filtrar por cartão');
+        selectCartao.addEventListener('change', carregarTabela);
+        const filtroFatura = document.getElementById('filtroFatura');
+        if (filtroFatura?.nextSibling) filtroFatura.parentNode.insertBefore(selectCartao, filtroFatura.nextSibling);
+        else bar.appendChild(selectCartao);
+    }
+
+    if (!document.getElementById('filtroStatusFatura')) {
+        const selectStatus = document.createElement('select');
+        selectStatus.id = 'filtroStatusFatura';
+        selectStatus.setAttribute('aria-label', 'Filtrar por situação da fatura');
+        selectStatus.innerHTML = `
+            <option value="">Todos os status</option>
+            <option value="aberta">Em aberto</option>
+            <option value="parcial">Pagamento parcial</option>
+            <option value="paga">Fatura paga</option>
+        `;
+        selectStatus.addEventListener('change', carregarTabela);
+        bar.appendChild(selectStatus);
+    }
+
+    familyInvoicePopulateCardFilter();
+}
+
+function familyInvoicePopulateCardFilter() {
+    const select = document.getElementById('filtroCartaoHistorico');
+    if (!select) return;
+
+    const atual = select.value;
+    const ativos = typeof familyCatalog !== 'undefined' && Array.isArray(familyCatalog?.cartoes)
+        ? familyCatalog.cartoes
+        : [];
+    const historicos = listaGastos.map(g => g?.c).filter(Boolean);
+    const cartoes = [...new Set([...ativos, ...historicos])];
+
+    select.innerHTML = '<option value="">Todos os cartões</option>' +
+        cartoes.map(cartao => `<option value="${escapeHTML(cartao)}">${escapeHTML(cartao)}</option>`).join('');
+
+    if (cartoes.includes(atual)) select.value = atual;
+}
+
+function familyInvoiceRenderPanel() {
+    const grid = document.getElementById('invoicePaymentGrid');
+    const summary = document.getElementById('invoicePaymentSummary');
+    const select = document.getElementById('invoicePaymentCompetencia');
+    if (!grid || !summary || !select) return;
+
+    familyInvoicePopulatePanelCompetencias();
+    const competencia = select.value;
+    if (!competenciaValida(competencia)) {
+        grid.innerHTML = '<div class="invoice-payment-empty">Nenhuma competência disponível.</div>';
+        summary.innerHTML = '';
+        return;
+    }
+
+    const cartoes = familyInvoiceCardsForCompetencia(competencia);
+    let totalMes = 0;
+    let pagoMes = 0;
+
+    const cards = cartoes.map(cartao => {
+        const total = familyInvoiceTotalCents(competencia, cartao);
+        const pagoRegistrado = familyInvoicePaidCents(competencia, cartao);
+        const pago = total > 0 ? Math.min(pagoRegistrado, total) : pagoRegistrado;
+        const falta = Math.max(total - pago, 0);
+        const status = familyInvoiceStatus(competencia, cartao);
+        totalMes += total;
+        pagoMes += Math.min(pago, total);
+
+        const compSafe = encodeURIComponent(competencia);
+        const cardSafe = encodeURIComponent(cartao);
+        const disabled = total <= 0 ? ' disabled' : '';
+
+        return `<article class="invoice-payment-card status-${status}">
+            <div class="invoice-payment-card-head">
+                <strong>${escapeHTML(cartao)}</strong>
+                <span class="invoice-status-badge status-${status}">${escapeHTML(familyInvoiceStatusLabel(status))}</span>
+            </div>
+            <div class="invoice-payment-values">
+                <div><span>Total</span><strong>${formatarMoeda(familyInvoiceFromCents(total))}</strong></div>
+                <div><span>Pago</span><strong>${formatarMoeda(familyInvoiceFromCents(pago))}</strong></div>
+                <div><span>Falta</span><strong>${formatarMoeda(familyInvoiceFromCents(falta))}</strong></div>
+            </div>
+            <div class="invoice-payment-actions">
+                <button type="button" class="invoice-view" onclick="familyInvoiceView('${compSafe}','${cardSafe}')">Ver lançamentos</button>
+                <button type="button" class="invoice-open"${disabled} onclick="familyInvoiceMarkOpen(decodeURIComponent('${compSafe}'),decodeURIComponent('${cardSafe}'))">Em aberto</button>
+                <button type="button" class="invoice-partial"${disabled} onclick="familyInvoiceMarkPartial(decodeURIComponent('${compSafe}'),decodeURIComponent('${cardSafe}'))">Parcial</button>
+                <button type="button" class="invoice-paid"${disabled} onclick="familyInvoiceMarkPaid(decodeURIComponent('${compSafe}'),decodeURIComponent('${cardSafe}'))">Paga</button>
+            </div>
+        </article>`;
+    });
+
+    const faltaMes = Math.max(totalMes - pagoMes, 0);
+    summary.innerHTML = `
+        <div><span>Total em ${escapeHTML(formatarCompetencia(competencia))}</span><strong>${formatarMoeda(familyInvoiceFromCents(totalMes))}</strong></div>
+        <div><span>Já pago</span><strong>${formatarMoeda(familyInvoiceFromCents(pagoMes))}</strong></div>
+        <div><span>Falta pagar</span><strong>${formatarMoeda(familyInvoiceFromCents(faltaMes))}</strong></div>
+    `;
+
+    grid.innerHTML = cards.length
+        ? cards.join('')
+        : '<div class="invoice-payment-empty">Nenhum cartão cadastrado para esta competência.</div>';
+}
+
+function familyInvoiceView(compEncoded, cardEncoded) {
+    const competencia = decodeURIComponent(compEncoded);
+    const cartao = decodeURIComponent(cardEncoded);
+
+    const pesquisa = document.getElementById('inputPesquisa');
+    const filtroMes = document.getElementById('filtroMes');
+    const filtroFatura = document.getElementById('filtroFatura');
+    const filtroAno = document.getElementById('filtroAno');
+    const filtroCartao = document.getElementById('filtroCartaoHistorico');
+    const filtroStatus = document.getElementById('filtroStatusFatura');
+
+    if (pesquisa) pesquisa.value = '';
+    if (filtroMes) filtroMes.value = '';
+    if (filtroAno) filtroAno.value = '';
+    if (filtroStatus) filtroStatus.value = '';
+
+    if (filtroFatura) {
+        if (![...filtroFatura.options].some(op => op.value === competencia)) {
+            popularFiltroCompetencias();
+        }
+        filtroFatura.value = competencia;
+    }
+    if (filtroCartao) {
+        familyInvoicePopulateCardFilter();
+        filtroCartao.value = cartao;
+    }
+
+    const panelComp = document.getElementById('invoicePaymentCompetencia');
+    if (panelComp) panelComp.value = competencia;
+
+    carregarTabela();
+    document.querySelector('.filter-bar')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+const familyInvoiceFiltrarOriginal = filtrarGastos;
+filtrarGastos = function() {
+    const base = familyInvoiceFiltrarOriginal();
+    const cartao = document.getElementById('filtroCartaoHistorico')?.value || '';
+    const status = document.getElementById('filtroStatusFatura')?.value || '';
+
+    return base.filter(gasto => {
+        if (cartao && gasto.c !== cartao) return false;
+        if (status) {
+            if (!competenciaValida(gasto.competenciaFatura)) return false;
+            if (familyInvoiceStatus(gasto.competenciaFatura, gasto.c) !== status) return false;
+        }
+        return true;
+    });
+};
+
+const familyInvoiceFiltrosAtivosOriginal = filtrosAtivos;
+filtrosAtivos = function() {
+    return familyInvoiceFiltrosAtivosOriginal() ||
+        Boolean(document.getElementById('filtroCartaoHistorico')?.value) ||
+        Boolean(document.getElementById('filtroStatusFatura')?.value);
+};
+
+const familyInvoicePopularCompetenciasOriginal = popularFiltroCompetencias;
+popularFiltroCompetencias = function() {
+    familyInvoicePopularCompetenciasOriginal();
+    familyInvoicePopulatePanelCompetencias();
+};
+
+const familyInvoiceCarregarTabelaOriginal = carregarTabela;
+carregarTabela = function() {
+    familyInvoiceCarregarTabelaOriginal();
+    familyInvoicePopulateCardFilter();
+    familyInvoiceRenderPanel();
+};
+
+if (typeof atualizarInterfaceCatalogo === 'function') {
+    const familyInvoiceAtualizarCatalogoOriginal = atualizarInterfaceCatalogo;
+    atualizarInterfaceCatalogo = function() {
+        familyInvoiceAtualizarCatalogoOriginal();
+        familyInvoicePopulateCardFilter();
+        familyInvoiceRenderPanel();
+    };
+}
+
+if (typeof renomearCatalogo === 'function') {
+    const familyInvoiceRenomearCatalogoOriginal = renomearCatalogo;
+    renomearCatalogo = function(tipo, nomeAtual) {
+        const antes = tipo === 'cartao' && typeof familyCatalog !== 'undefined'
+            ? [...familyCatalog.cartoes]
+            : [];
+        familyInvoiceRenomearCatalogoOriginal(tipo, nomeAtual);
+
+        if (tipo !== 'cartao' || typeof familyCatalog === 'undefined') return;
+        const depois = [...familyCatalog.cartoes];
+        const removidos = antes.filter(x => !depois.includes(x));
+        const adicionados = depois.filter(x => !antes.includes(x));
+
+        if (removidos.length !== 1 || adicionados.length !== 1 || removidos[0] !== nomeAtual) return;
+
+        const novo = adicionados[0];
+        let mudou = false;
+        Object.entries({ ...familyInvoicePayments }).forEach(([chave, entry]) => {
+            const parsed = familyInvoiceParseKey(chave);
+            if (!parsed || parsed.cartao !== nomeAtual) return;
+            const novaChave = familyInvoiceKey(parsed.competencia, novo);
+            const atualNovo = familyInvoicePayments[novaChave];
+            const novoEntry = familyInvoiceNormalizeEntry(entry);
+            if (!atualNovo || (Date.parse(novoEntry.updatedAt) || 0) >= (Date.parse(atualNovo.updatedAt) || 0)) {
+                familyInvoicePayments[novaChave] = {
+                    ...novoEntry,
+                    updatedAt: new Date().toISOString()
+                };
+                mudou = true;
+            }
+        });
+        if (mudou) familyInvoiceSaveLocal();
+    };
+}
+
+function familyInvoiceCloudReady() {
+    return Boolean(window.supabase?.createClient);
+}
+
+async function familyInvoiceEnsureSupabase() {
+    if (familyInvoiceCloudReady()) return;
+
+    await new Promise((resolve, reject) => {
+        const existing = [...document.scripts].find(s => String(s.src || '').includes('@supabase/supabase-js'));
+        if (existing) {
+            const started = Date.now();
+            const timer = setInterval(() => {
+                if (familyInvoiceCloudReady()) {
+                    clearInterval(timer);
+                    resolve();
+                } else if (Date.now() - started > 5000) {
+                    clearInterval(timer);
+                    reject(new Error('Supabase indisponível'));
+                }
+            }, 60);
+            return;
+        }
+
+        const script = document.createElement('script');
+        script.src = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2';
+        script.onload = resolve;
+        script.onerror = () => reject(new Error('Falha ao carregar Supabase'));
+        document.head.appendChild(script);
+    });
+}
+
+async function familyInvoiceSync(silent = true) {
+    if (!navigator.onLine || !familyInvoicePaymentClient || !familyInvoicePaymentUser || familyInvoicePaymentSyncing) return;
+
+    familyInvoicePaymentSyncing = true;
+    try {
+        const { data: row, error } = await familyInvoicePaymentClient
+            .from(FAMILY_INVOICE_PAYMENT_TABLE)
+            .select('invoice_payments, invoice_payments_updated_at')
+            .eq('user_id', familyInvoicePaymentUser.id)
+            .maybeSingle();
+        if (error) throw error;
+
+        const remote = familyInvoiceNormalizeMap(row?.invoice_payments || {});
+        const merged = familyInvoiceMergeMaps(familyInvoicePayments, remote);
+        const localChanged = !familyInvoiceMapEqual(merged, familyInvoicePayments);
+        const remoteChanged = !familyInvoiceMapEqual(merged, remote);
+
+        if (localChanged) {
+            familyInvoicePayments = merged;
+            localStorage.setItem(FAMILY_INVOICE_PAYMENT_KEY, JSON.stringify(familyInvoicePayments));
+            await familyInvoiceSaveIndexedDB().catch(() => {});
+            familyInvoiceRefreshUI();
+        }
+
+        if (remoteChanged) {
+            const latest = familyInvoiceLatestUpdatedAt(merged) || new Date().toISOString();
+            const { error: saveError } = await familyInvoicePaymentClient
+                .from(FAMILY_INVOICE_PAYMENT_TABLE)
+                .upsert({
+                    user_id: familyInvoicePaymentUser.id,
+                    invoice_payments: merged,
+                    invoice_payments_updated_at: latest
+                }, { onConflict: 'user_id' });
+            if (saveError) throw saveError;
+        }
+    } catch (erro) {
+        if (!silent) console.warn('Falha ao sincronizar pagamentos de faturas:', erro);
+    } finally {
+        familyInvoicePaymentSyncing = false;
+    }
+}
+
+async function familyInvoiceInitCloud() {
+    if (!navigator.onLine) return;
+
+    try {
+        await familyInvoiceEnsureSupabase();
+        familyInvoicePaymentClient = window.supabase.createClient(
+            FAMILY_INVOICE_PAYMENT_SUPABASE_URL,
+            FAMILY_INVOICE_PAYMENT_SUPABASE_KEY,
+            {
+                auth: {
+                    storageKey: FAMILY_INVOICE_PAYMENT_AUTH_STORAGE_KEY,
+                    storage: window.localStorage,
+                    persistSession: true,
+                    autoRefreshToken: true,
+                    detectSessionInUrl: false
+                }
+            }
+        );
+
+        const { data } = await familyInvoicePaymentClient.auth.getSession();
+        familyInvoicePaymentUser = data?.session?.user || null;
+        if (familyInvoicePaymentUser) await familyInvoiceSync(true);
+
+        familyInvoicePaymentClient.auth.onAuthStateChange((_event, session) => {
+            familyInvoicePaymentUser = session?.user || null;
+            if (familyInvoicePaymentUser) {
+                setTimeout(() => familyInvoiceSync(true), 120);
+            }
+        });
+
+        clearInterval(familyInvoicePaymentPoll);
+        familyInvoicePaymentPoll = setInterval(() => familyInvoiceSync(true), 8000);
+    } catch (erro) {
+        console.warn('Controle de pagamento online indisponível; usando cópia local:', erro);
+    }
+}
+
+function familyInvoiceRefreshUI() {
+    try {
+        familyInvoicePopulateCardFilter();
+        familyInvoiceRenderPanel();
+        familyInvoiceCarregarTabelaOriginal();
+    } catch (erro) {
+        console.warn('Não foi possível atualizar a situação das faturas:', erro);
+    }
+}
+
+familyInvoiceCreatePanel();
+familyInvoiceCreateFilters();
+familyInvoicePopulatePanelCompetencias();
+
+document.getElementById('filtroFatura')?.addEventListener('change', () => {
+    const valor = document.getElementById('filtroFatura')?.value || '';
+    const panel = document.getElementById('invoicePaymentCompetencia');
+    if (panel && competenciaValida(valor) && [...panel.options].some(op => op.value === valor)) {
+        panel.value = valor;
+        familyInvoiceRenderPanel();
+    }
+});
+
+familyInvoiceReconcileIndexedDB()
+    .finally(() => {
+        familyInvoiceRenderPanel();
+        carregarTabela();
+    });
+
+familyInvoiceInitCloud();
+
+window.addEventListener('online', () => {
+    setTimeout(() => {
+        if (!familyInvoicePaymentClient) familyInvoiceInitCloud();
+        else familyInvoiceSync(false);
+    }, 350);
+});

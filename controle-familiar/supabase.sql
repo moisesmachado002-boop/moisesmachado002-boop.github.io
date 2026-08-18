@@ -9,16 +9,21 @@ create table if not exists public.family_finance_state (
   data jsonb not null default '{}'::jsonb,
   catalog jsonb not null default '{}'::jsonb,
   catalog_updated_at timestamptz,
+  invoice_payments jsonb not null default '{}'::jsonb,
+  invoice_payments_updated_at timestamptz,
   updated_at timestamptz not null default now()
 );
 
--- Compatibilidade com instalações criadas antes da v2.4.0.
+-- Compatibilidade com instalações criadas antes das versões 2.4.0 e 2.5.0.
 alter table public.family_finance_state
   add column if not exists catalog jsonb not null default '{}'::jsonb,
-  add column if not exists catalog_updated_at timestamptz;
+  add column if not exists catalog_updated_at timestamptz,
+  add column if not exists invoice_payments jsonb not null default '{}'::jsonb,
+  add column if not exists invoice_payments_updated_at timestamptz;
 
--- updated_at pertence aos lançamentos. Alterações apenas no catálogo não devem
--- fazer a sincronização de gastos interpretar que o JSON de gastos mudou.
+-- updated_at pertence somente aos lançamentos. Alterações no catálogo ou no
+-- controle de pagamento das faturas não devem fazer a sincronização de gastos
+-- interpretar que o JSON de gastos mudou.
 create or replace function public.set_family_finance_state_updated_at()
 returns trigger
 language plpgsql
