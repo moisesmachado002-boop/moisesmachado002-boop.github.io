@@ -1,0 +1,481 @@
+/* v2.4.0 - cadastro editável de pessoas e cartões */
+
+const FAMILY_CATALOG_KEY = 'family-finance-catalog-v1';
+const FAMILY_CATALOG_META_KEY = 'family-finance-catalog-meta-v1';
+const FAMILY_CATALOG_IDB_KEY = 'catalog';
+const FAMILY_CATALOG_SUPABASE_URL = 'https://pqcltcegwmyuzytivakt.supabase.co';
+const FAMILY_CATALOG_SUPABASE_KEY = 'sb_publishable_3B61vWHjC_Qu3ksO0GJVXA_d_ytJyop';
+const FAMILY_CATALOG_AUTH_STORAGE_KEY = 'family-finance-auth-pqcltcegwmyuzytivakt';
+const FAMILY_CATALOG_TABLE = 'family_finance_state';
+
+let familyCatalog = familyCatalogCarregarLocal();
+let familyCatalogClient = null;
+let familyCatalogUser = null;
+let familyCatalogSyncing = false;
+let familyCatalogPollTimer = null;
+
+function familyCatalogLimparNome(valor) {
+    return String(valor || '').replace(/\s+/g, ' ').trim();
+}
+
+function familyCatalogUnicos(lista) {
+    const saida = [];
+    const vistos = new Set();
+    (Array.isArray(lista) ? lista : []).forEach(item => {
+        const nome = familyCatalogLimparNome(item);
+        if (!nome) return;
+        const chave = nome.toLocaleLowerCase('pt-BR');
+        if (vistos.has(chave)) return;
+        vistos.add(chave);
+        saida.push(nome);
+    });
+    return saida;
+}
+
+function familyCatalogPadrao() {
+    const pessoasHistoricas = listaGastos.map(g => g?.p).filter(Boolean);
+    const cartoesHistoricos = listaGastos.map(g => g?.c).filter(Boolean);
+    return {
+        pessoas: familyCatalogUnicos([...pessoasBase, ...pessoasHistoricas]),
+        cartoes: familyCatalogUnicos([...cartoesBase, ...cartoesHistoricos]),
+        updatedAt: null
+    };
+}
+
+function familyCatalogNormalizar(raw) {
+    const padrao = familyCatalogPadrao();
+    const source = raw && typeof raw === 'object' ? raw : {};
+    return {
+        pessoas: familyCatalogUnicos(Array.isArray(source.pessoas) ? source.pessoas : padrao.pessoas),
+        cartoes: familyCatalogUnicos(Array.isArray(source.cartoes) ? source.cartoes : padrao.cartoes),
+        updatedAt: source.updatedAt || null
+    };
+}
+
+function familyCatalogCarregarLocal() {
+    try {
+        const bruto = localStorage.getItem(FAMILY_CATALOG_KEY);
+        if (!bruto) {
+            const inicial = familyCatalogPadrao();
+            localStorage.setItem(FAMILY_CATALOG_KEY, JSON.stringify(inicial));
+            return inicial;
+        }
+        return familyCatalogNormalizar(JSON.parse(bruto));
+    } catch {
+        return familyCatalogPadrao();
+    }
+}
+
+function familyCatalogSalvarLocal({ marcarAlteracao = true } = {}) {
+    if (marcarAlteracao) familyCatalog.updatedAt = new Date().toISOString();
+    familyCatalog = familyCatalogNormalizar(familyCatalog);
+    localStorage.setItem(FAMILY_CATALOG_KEY, JSON.stringify(familyCatalog));
+    localStorage.setItem(FAMILY_CATALOG_META_KEY, JSON.stringify({ updatedAt: familyCatalog.updatedAt }));
+    familyCatalogSalvarIndexedDB().catch(() => {});
+    familyCatalogAtualizarInterface();
+    if (navigator.onLine) setTimeout(() => familyCatalogSincronizar(false), 100);
+}
+
+async function familyCatalogSalvarIndexedDB() {
+    if (typeof familyIdbAbrir !== 'function') return;
+    const db = await familyIdbAbrir();
+    try {
+        await new Promise((resolve, reject) => {
+            const tx = db.transaction(FAMILY_IDB_STORE, 'readwrite');
+            tx.objectStore(FAMILY_IDB_STORE).put({ ...familyCatalog }, FAMILY_CATALOG_IDB_KEY);
+            tx.oncomplete = resolve;
+            tx.onerror = () => reject(tx.error || new Error('Falha ao salvar catálogo local'));
+            tx.onabort = () => reject(tx.error || new Error('Catálogo local cancelado'));
+        });
+    } finally {
+        db.close();
+    }
+}
+
+async function familyCatalogRecuperarIndexedDBSeNecessario() {
+    if (localStorage.getItem(FAMILY_CATALOG_KEY) || typeof familyIdbAbrir !== 'function') return;
+    try {
+        const db = await familyIdbAbrir();
+        let salvo = null;
+        try {
+            salvo = await new Promise((resolve, reject) => {
+                const tx = db.transaction(FAMILY_IDB_STORE, 'readonly');
+                const request = tx.objectStore(FAMILY_IDB_STORE).get(FAMILY_CATALOG_IDB_KEY);
+                request.onsuccess = () => resolve(request.result || null);
+                request.onerror = () => reject(request.error);
+            });
+        } finally {
+            db.close();
+        }
+        if (salvo) {
+            familyCatalog = familyCatalogNormalizar(salvo);
+            localStorage.setItem(FAMILY_CATALOG_KEY, JSON.stringify(familyCatalog));
+            familyCatalogAtualizarInterface();
+        }
+    } catch {}
+}
+
+function familyCatalogListaAtiva(tipo) {
+    return tipo === 'pessoa' ? familyCatalog.pessoas : familyCatalog.cartoes;
+}
+
+function familyCatalogSetLista(tipo, lista) {
+    if (tipo === 'pessoa') familyCatalog.pessoas = familyCatalogUnicos(lista);
+    else familyCatalog.cartoes = familyCatalogUnicos(lista);
+}
+
+function familyCatalogTipoLabel(tipo) {
+    return tipo === 'pessoa' ? 'pessoa' : 'cartão';
+}
+
+function familyCatalogUsos(tipo, nome) {
+    const campo = tipo === 'pessoa' ? 'p' : 'c';
+    return listaGastos.filter(g => String(g?.[campo] || '') === nome).length;
+}
+
+const familyCatalogPopularSelectsAnterior = popularSelects;
+popularSelects = function() {
+    const selectPessoa = document.getElementById('pessoa');
+    const selectCartao = document.getElementById('cartao');
+    if (!selectPessoa || !selectCartao) return familyCatalogPopularSelectsAnterior();
+
+    const pessoaAtual = selectPessoa.value;
+    const cartaoAtual = selectCartao.value;
+    const pessoas = familyCatalog.pessoas.length ? familyCatalog.pessoas : familyCatalogPadrao().pessoas;
+    const cartoes = familyCatalog.cartoes.length ? familyCatalog.cartoes : familyCatalogPadrao().cartoes;
+
+    selectPessoa.innerHTML = pessoas.map(p => `<option value="${escapeHTML(p)}">${escapeHTML(p)}</option>`).join('');
+    selectCartao.innerHTML = cartoes.map(c => `<option value="${escapeHTML(c)}">${escapeHTML(c)}</option>`).join('');
+
+    if (pessoaAtual && pessoas.includes(pessoaAtual)) selectPessoa.value = pessoaAtual;
+    if (cartaoAtual && cartoes.includes(cartaoAtual)) selectCartao.value = cartaoAtual;
+};
+
+function familyCatalogAtualizarInterface() {
+    try {
+        popularSelects();
+        carregarTabela();
+        if (typeof renderProximasFaturas === 'function') renderProximasFaturas();
+        familyCatalogRenderModal();
+    } catch (erro) {
+        console.warn('Não foi possível atualizar o cadastro na interface:', erro);
+    }
+}
+
+function familyCatalogCriarPainel() {
+    if (document.getElementById('familyCatalogPanel')) return;
+    const referencia = document.getElementById('totaisDashboard');
+    if (!referencia) return;
+
+    const painel = document.createElement('section');
+    painel.id = 'familyCatalogPanel';
+    painel.className = 'catalog-panel';
+    painel.innerHTML = `
+        <div class="catalog-panel-text">
+            <strong>Cadastros</strong>
+            <span>Gerencie quem usa o sistema e os cartões disponíveis nos lançamentos.</span>
+        </div>
+        <div class="catalog-panel-actions">
+            <button type="button" class="btn-secondary" data-catalog-open="pessoa">Pessoas</button>
+            <button type="button" class="btn-secondary" data-catalog-open="cartao">Cartões</button>
+        </div>`;
+    referencia.parentNode.insertBefore(painel, referencia);
+
+    painel.querySelectorAll('[data-catalog-open]').forEach(btn => {
+        btn.addEventListener('click', () => familyCatalogAbrir(btn.dataset.catalogOpen));
+    });
+}
+
+function familyCatalogCriarModal() {
+    if (document.getElementById('familyCatalogModal')) return;
+    const modal = document.createElement('div');
+    modal.id = 'familyCatalogModal';
+    modal.className = 'catalog-modal-backdrop';
+    modal.hidden = true;
+    modal.innerHTML = `
+        <div class="catalog-modal" role="dialog" aria-modal="true" aria-labelledby="familyCatalogTitle">
+            <div class="catalog-modal-head">
+                <div>
+                    <h3 id="familyCatalogTitle">Cadastros</h3>
+                    <p id="familyCatalogSubtitle"></p>
+                </div>
+                <button type="button" class="catalog-close" id="familyCatalogClose" aria-label="Fechar">×</button>
+            </div>
+            <div class="catalog-add-row">
+                <input id="familyCatalogNew" type="text" maxlength="60" placeholder="Novo cadastro">
+                <button id="familyCatalogAdd" type="button" class="btn-secondary">Adicionar</button>
+            </div>
+            <div id="familyCatalogList" class="catalog-list"></div>
+        </div>`;
+    document.body.appendChild(modal);
+    document.getElementById('familyCatalogClose').addEventListener('click', familyCatalogFechar);
+    modal.addEventListener('click', e => { if (e.target === modal) familyCatalogFechar(); });
+    document.getElementById('familyCatalogAdd').addEventListener('click', familyCatalogAdicionarAtual);
+    document.getElementById('familyCatalogNew').addEventListener('keydown', e => {
+        if (e.key === 'Enter') familyCatalogAdicionarAtual();
+    });
+}
+
+let familyCatalogTipoAtual = 'pessoa';
+
+function familyCatalogAbrir(tipo) {
+    familyCatalogTipoAtual = tipo === 'cartao' ? 'cartao' : 'pessoa';
+    familyCatalogRenderModal();
+    const modal = document.getElementById('familyCatalogModal');
+    modal.hidden = false;
+    document.getElementById('familyCatalogNew').focus();
+}
+
+function familyCatalogFechar() {
+    const modal = document.getElementById('familyCatalogModal');
+    if (modal) modal.hidden = true;
+}
+
+function familyCatalogRenderModal() {
+    const listaEl = document.getElementById('familyCatalogList');
+    if (!listaEl) return;
+    const isPessoa = familyCatalogTipoAtual === 'pessoa';
+    document.getElementById('familyCatalogTitle').textContent = isPessoa ? 'Pessoas' : 'Cartões';
+    document.getElementById('familyCatalogSubtitle').textContent = isPessoa
+        ? 'Adicione, renomeie ou remova pessoas dos novos lançamentos.'
+        : 'Adicione, renomeie ou remova cartões dos novos lançamentos.';
+    document.getElementById('familyCatalogNew').placeholder = isPessoa ? 'Nome da pessoa' : 'Nome do cartão';
+
+    const lista = familyCatalogListaAtiva(familyCatalogTipoAtual);
+    if (!lista.length) {
+        listaEl.innerHTML = '<div class="catalog-empty">Nenhum cadastro ativo.</div>';
+        return;
+    }
+
+    listaEl.innerHTML = lista.map(nome => {
+        const usos = familyCatalogUsos(familyCatalogTipoAtual, nome);
+        const seguro = encodeURIComponent(nome);
+        return `<div class="catalog-item">
+            <div class="catalog-item-name">
+                <strong>${escapeHTML(nome)}</strong>
+                <span>${usos ? `${usos} lançamento(s) no histórico` : 'Sem lançamentos'}</span>
+            </div>
+            <div class="catalog-item-actions">
+                <button type="button" class="catalog-edit" onclick="familyCatalogRenomear('${familyCatalogTipoAtual}', decodeURIComponent('${seguro}'))">Editar</button>
+                <button type="button" class="catalog-delete" onclick="familyCatalogRemover('${familyCatalogTipoAtual}', decodeURIComponent('${seguro}'))">Remover</button>
+            </div>
+        </div>`;
+    }).join('');
+}
+
+function familyCatalogAdicionarAtual() {
+    const input = document.getElementById('familyCatalogNew');
+    let nome = familyCatalogLimparNome(input.value);
+    if (familyCatalogTipoAtual === 'cartao') nome = nome.toUpperCase();
+    if (!nome) return;
+
+    const lista = familyCatalogListaAtiva(familyCatalogTipoAtual);
+    if (lista.some(x => x.toLocaleLowerCase('pt-BR') === nome.toLocaleLowerCase('pt-BR'))) {
+        alert(`Este ${familyCatalogTipoLabel(familyCatalogTipoAtual)} já está cadastrado.`);
+        return;
+    }
+    familyCatalogSetLista(familyCatalogTipoAtual, [...lista, nome]);
+    input.value = '';
+    familyCatalogSalvarLocal();
+}
+
+function familyCatalogRenomear(tipo, nomeAtual) {
+    const lista = familyCatalogListaAtiva(tipo);
+    if (!lista.includes(nomeAtual)) return;
+    let novo = familyCatalogLimparNome(prompt(`Novo nome para ${nomeAtual}:`, nomeAtual));
+    if (!novo || novo === nomeAtual) return;
+    if (tipo === 'cartao') novo = novo.toUpperCase();
+    if (lista.some(x => x !== nomeAtual && x.toLocaleLowerCase('pt-BR') === novo.toLocaleLowerCase('pt-BR'))) {
+        alert('Já existe outro cadastro com esse nome.');
+        return;
+    }
+
+    const usos = familyCatalogUsos(tipo, nomeAtual);
+    if (usos && !confirm(`Existem ${usos} lançamento(s) usando “${nomeAtual}”.\n\nRenomear também atualizará esses lançamentos antigos para “${novo}”. Deseja continuar?`)) return;
+
+    const campo = tipo === 'pessoa' ? 'p' : 'c';
+    listaGastos.forEach(g => { if (g[campo] === nomeAtual) g[campo] = novo; });
+    familyCatalogSetLista(tipo, lista.map(x => x === nomeAtual ? novo : x));
+    salvarLocal();
+    familyCatalogSalvarLocal();
+}
+
+function familyCatalogRemover(tipo, nome) {
+    const lista = familyCatalogListaAtiva(tipo);
+    if (!lista.includes(nome)) return;
+    if (lista.length <= 1) {
+        alert(`Mantenha pelo menos um ${familyCatalogTipoLabel(tipo)} cadastrado.`);
+        return;
+    }
+    const usos = familyCatalogUsos(tipo, nome);
+    const detalhe = usos
+        ? `\n\nOs ${usos} lançamento(s) antigos continuarão no histórico, mas “${nome}” não aparecerá mais para novos gastos.`
+        : '';
+    if (!confirm(`Remover “${nome}” do cadastro?${detalhe}`)) return;
+    familyCatalogSetLista(tipo, lista.filter(x => x !== nome));
+    familyCatalogSalvarLocal();
+}
+
+async function familyCatalogGarantirSupabase() {
+    if (window.supabase?.createClient) return;
+    await new Promise((resolve, reject) => {
+        const existente = [...document.scripts].find(s => String(s.src || '').includes('@supabase/supabase-js'));
+        if (existente) {
+            if (window.supabase?.createClient) return resolve();
+            existente.addEventListener('load', resolve, { once: true });
+            existente.addEventListener('error', reject, { once: true });
+            setTimeout(() => window.supabase?.createClient ? resolve() : null, 300);
+            return;
+        }
+        const script = document.createElement('script');
+        script.src = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2';
+        script.onload = resolve;
+        script.onerror = reject;
+        document.head.appendChild(script);
+    });
+}
+
+async function familyCatalogInicializarNuvem() {
+    if (!navigator.onLine) return;
+    try {
+        await familyCatalogGarantirSupabase();
+        familyCatalogClient = window.supabase.createClient(FAMILY_CATALOG_SUPABASE_URL, FAMILY_CATALOG_SUPABASE_KEY, {
+            auth: {
+                storageKey: FAMILY_CATALOG_AUTH_STORAGE_KEY,
+                storage: window.localStorage,
+                persistSession: true,
+                autoRefreshToken: true,
+                detectSessionInUrl: false
+            }
+        });
+        const { data } = await familyCatalogClient.auth.getSession();
+        familyCatalogUser = data?.session?.user || null;
+        if (familyCatalogUser) await familyCatalogSincronizar(true);
+
+        familyCatalogClient.auth.onAuthStateChange((_event, session) => {
+            familyCatalogUser = session?.user || null;
+            if (familyCatalogUser) setTimeout(() => familyCatalogSincronizar(true), 100);
+        });
+
+        clearInterval(familyCatalogPollTimer);
+        familyCatalogPollTimer = setInterval(() => familyCatalogSincronizar(true), 7000);
+    } catch (erro) {
+        console.warn('Cadastro online indisponível; mantendo cadastro local:', erro);
+    }
+}
+
+function familyCatalogCloudValido(catalogo) {
+    return catalogo && typeof catalogo === 'object' && (Array.isArray(catalogo.pessoas) || Array.isArray(catalogo.cartoes));
+}
+
+async function familyCatalogSincronizar(silencioso = true) {
+    if (!navigator.onLine || !familyCatalogClient || !familyCatalogUser || familyCatalogSyncing) return;
+    familyCatalogSyncing = true;
+    try {
+        const { data: row, error } = await familyCatalogClient
+            .from(FAMILY_CATALOG_TABLE)
+            .select('catalog, catalog_updated_at')
+            .eq('user_id', familyCatalogUser.id)
+            .maybeSingle();
+        if (error) throw error;
+
+        const remotoValido = familyCatalogCloudValido(row?.catalog);
+        const remotoAt = Date.parse(row?.catalog_updated_at || '') || 0;
+        const localAt = Date.parse(familyCatalog.updatedAt || '') || 0;
+
+        if (remotoValido && remotoAt > localAt) {
+            familyCatalog = familyCatalogNormalizar({ ...row.catalog, updatedAt: row.catalog_updated_at });
+            localStorage.setItem(FAMILY_CATALOG_KEY, JSON.stringify(familyCatalog));
+            await familyCatalogSalvarIndexedDB().catch(() => {});
+            familyCatalogAtualizarInterface();
+            return;
+        }
+
+        if (!remotoValido || localAt >= remotoAt) {
+            const atualizado = familyCatalog.updatedAt || new Date().toISOString();
+            familyCatalog.updatedAt = atualizado;
+            const payload = { pessoas: familyCatalog.pessoas, cartoes: familyCatalog.cartoes };
+            const { error: saveError } = await familyCatalogClient
+                .from(FAMILY_CATALOG_TABLE)
+                .upsert({
+                    user_id: familyCatalogUser.id,
+                    catalog: payload,
+                    catalog_updated_at: atualizado
+                }, { onConflict: 'user_id' });
+            if (saveError) throw saveError;
+            localStorage.setItem(FAMILY_CATALOG_KEY, JSON.stringify(familyCatalog));
+            await familyCatalogSalvarIndexedDB().catch(() => {});
+        }
+    } catch (erro) {
+        if (!silencioso) console.warn('Falha ao sincronizar cadastros:', erro);
+    } finally {
+        familyCatalogSyncing = false;
+    }
+}
+
+/* Backup JSON passa a incluir também os cadastros, mantendo compatibilidade com backups antigos. */
+exportarJSON = function() {
+    const pacote = {
+        version: String(window.__CONTROLE_FAMILIAR_VERSION || ''),
+        exportedAt: new Date().toISOString(),
+        gastos: listaGastos,
+        catalogo: {
+            pessoas: familyCatalog.pessoas,
+            cartoes: familyCatalog.cartoes
+        }
+    };
+    const blob = new Blob([JSON.stringify(pacote, null, 2)], { type: 'application/json;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = nomeBackupHoje();
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+};
+
+const familyCatalogImportarAnterior = importarJSON;
+importarJSON = function(event) {
+    const arquivo = event?.target?.files?.[0];
+    if (!arquivo) return;
+    const leitorCatalogo = new FileReader();
+    leitorCatalogo.onload = e => {
+        try {
+            const conteudo = JSON.parse(e.target.result);
+            if (conteudo && !Array.isArray(conteudo) && conteudo.catalogo) {
+                const cat = familyCatalogNormalizar({
+                    pessoas: conteudo.catalogo.pessoas,
+                    cartoes: conteudo.catalogo.cartoes,
+                    updatedAt: new Date().toISOString()
+                });
+                localStorage.setItem('family-finance-import-catalog-temp', JSON.stringify(cat));
+            }
+        } catch {}
+        const clone = new DataTransfer();
+        clone.items.add(arquivo);
+        event.target.files = clone.files;
+        familyCatalogImportarAnterior(event);
+        setTimeout(() => {
+            try {
+                const temp = JSON.parse(localStorage.getItem('family-finance-import-catalog-temp') || 'null');
+                localStorage.removeItem('family-finance-import-catalog-temp');
+                if (temp) {
+                    familyCatalog = familyCatalogNormalizar(temp);
+                    familyCatalogSalvarLocal();
+                }
+            } catch {}
+        }, 250);
+    };
+    leitorCatalogo.readAsText(arquivo);
+};
+
+familyCatalogCriarPainel();
+familyCatalogCriarModal();
+popularSelects();
+familyCatalogRecuperarIndexedDBSeNecessario();
+familyCatalogInicializarNuvem();
+window.addEventListener('online', () => setTimeout(() => {
+    if (!familyCatalogClient) familyCatalogInicializarNuvem();
+    else familyCatalogSincronizar(false);
+}, 300));
