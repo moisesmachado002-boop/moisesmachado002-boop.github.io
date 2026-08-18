@@ -1,25 +1,27 @@
-const CACHE = 'controle-familiar-v2.4.0';
+const CACHE = 'controle-familiar-v2.5.0';
 const STATIC_ASSETS = [
   './index.html',
-  './loader.js?v=2.4.0',
-  './body.01.txt?v=2.4.0',
-  './style.01.txt?v=2.4.0',
-  './style.02.txt?v=2.4.0',
-  './style.03.txt?v=2.4.0',
-  './style.04.txt?v=2.4.0',
-  './style.05.txt?v=2.4.0',
-  './app.01.txt?v=2.4.0',
-  './app.02.txt?v=2.4.0',
-  './app.03.txt?v=2.4.0',
-  './app.04.txt?v=2.4.0',
-  './app.08.txt?v=2.4.0',
-  './app.10.txt?v=2.4.0',
-  './app.05.txt?v=2.4.0',
-  './app.06.txt?v=2.4.0',
-  './app.07.txt?v=2.4.0',
-  './app.09.txt?v=2.4.0',
-  './app.11.txt?v=2.4.0',
-  './app.12.txt?v=2.4.0'
+  './loader.js?v=2.5.0',
+  './body.01.txt?v=2.5.0',
+  './style.01.txt?v=2.5.0',
+  './style.02.txt?v=2.5.0',
+  './style.03.txt?v=2.5.0',
+  './style.04.txt?v=2.5.0',
+  './style.05.txt?v=2.5.0',
+  './style.06.txt?v=2.5.0',
+  './app.01.txt?v=2.5.0',
+  './app.02.txt?v=2.5.0',
+  './app.03.txt?v=2.5.0',
+  './app.04.txt?v=2.5.0',
+  './app.08.txt?v=2.5.0',
+  './app.10.txt?v=2.5.0',
+  './app.05.txt?v=2.5.0',
+  './app.06.txt?v=2.5.0',
+  './app.07.txt?v=2.5.0',
+  './app.09.txt?v=2.5.0',
+  './app.11.txt?v=2.5.0',
+  './app.12.txt?v=2.5.0',
+  './app.13.txt?v=2.5.0'
 ];
 
 self.addEventListener('install', event => {
