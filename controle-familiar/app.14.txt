@@ -3,12 +3,6 @@
 const FAMILY_TAB_VALIDAS = ['lancamentos', 'faturas', 'cadastros'];
 let familyTabAtual = 'lancamentos';
 
-function familyTabTitulo(tab) {
-    if (tab === 'faturas') return 'Faturas';
-    if (tab === 'cadastros') return 'Cadastros';
-    return 'Lançamentos';
-}
-
 function familyTabsCriarEstrutura() {
     if (document.getElementById('familyTabsNav')) return;
 
@@ -87,6 +81,23 @@ function familyTabsAtivar(tab, { rolar = false } = {}) {
     document.querySelectorAll('[data-family-panel]').forEach(panel => {
         panel.hidden = panel.dataset.familyPanel !== destino;
     });
+
+    if (destino === 'faturas') {
+        try {
+            if (typeof familyInvoiceRenderPanel === 'function') familyInvoiceRenderPanel();
+            if (typeof renderProximasFaturas === 'function') renderProximasFaturas();
+        } catch (erro) {
+            console.warn('Não foi possível atualizar a aba Faturas:', erro);
+        }
+    }
+
+    if (destino === 'cadastros') {
+        try {
+            if (typeof atualizarInterfaceCatalogo === 'function') atualizarInterfaceCatalogo();
+        } catch (erro) {
+            console.warn('Não foi possível atualizar a aba Cadastros:', erro);
+        }
+    }
 
     if (rolar) {
         document.getElementById('familyTabsNav')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
