@@ -1,0 +1,167 @@
+/* Hotfix 2.3.2 - fila persistente de alterações offline */
+
+const FAMILY_OFFLINE_PENDING_KEY = 'family-finance-offline-pending-v1';
+let familyOfflineApplying = false;
+let familyOfflineWaitingCloud = false;
+let familyOfflineLastStatus = '';
+
+function familyOfflineParseLista(raw) {
+    try {
+        const valor = JSON.parse(raw || '[]');
+        return Array.isArray(valor) ? valor : [];
+    } catch {
+        return [];
+    }
+}
+
+function familyOfflineLerPendencias() {
+    try {
+        const valor = JSON.parse(localStorage.getItem(FAMILY_OFFLINE_PENDING_KEY) || '{}');
+        return {
+            upserts: valor && typeof valor.upserts === 'object' && !Array.isArray(valor.upserts) ? valor.upserts : {},
+            deletes: Array.isArray(valor?.deletes) ? valor.deletes : [],
+            updatedAt: valor?.updatedAt || null
+        };
+    } catch {
+        return { upserts: {}, deletes: [], updatedAt: null };
+    }
+}
+
+function familyOfflineTemPendencias(pendencias = familyOfflineLerPendencias()) {
+    return Object.keys(pendencias.upserts).length > 0 || pendencias.deletes.length > 0;
+}
+
+function familyOfflineSalvarPendencias(pendencias) {
+    if (!familyOfflineTemPendencias(pendencias)) {
+        localStorage.removeItem(FAMILY_OFFLINE_PENDING_KEY);
+        return;
+    }
+    localStorage.setItem(FAMILY_OFFLINE_PENDING_KEY, JSON.stringify({
+        upserts: pendencias.upserts,
+        deletes: [...new Set(pendencias.deletes)],
+        updatedAt: new Date().toISOString()
+    }));
+}
+
+function familyOfflineJsonComparavel(gasto) {
+    try {
+        return JSON.stringify(normalizarGasto(gasto));
+    } catch {
+        return JSON.stringify(gasto || {});
+    }
+}
+
+function familyOfflineRegistrarDiff(antes, depois) {
+    const pendencias = familyOfflineLerPendencias();
+    const antesMap = new Map(antes.filter(g => g?.id).map(g => [String(g.id), g]));
+    const depoisMap = new Map(depois.filter(g => g?.id).map(g => [String(g.id), g]));
+    const deletes = new Set(pendencias.deletes.map(String));
+
+    depoisMap.forEach((gasto, id) => {
+        const anterior = antesMap.get(id);
+        if (!anterior || familyOfflineJsonComparavel(anterior) !== familyOfflineJsonComparavel(gasto)) {
+            pendencias.upserts[id] = normalizarGasto(gasto);
+            deletes.delete(id);
+        }
+    });
+
+    antesMap.forEach((gasto, id) => {
+        if (!depoisMap.has(id)) {
+            delete pendencias.upserts[id];
+            deletes.add(id);
+        }
+    });
+
+    pendencias.deletes = [...deletes];
+    familyOfflineSalvarPendencias(pendencias);
+
+    const status = document.getElementById('familyCloudStatus');
+    const mensagem = document.getElementById('familyCloudMessage');
+    if (status) {
+        status.textContent = 'Salvo neste aparelho';
+        status.className = 'cloud-status offline';
+    }
+    if (mensagem) {
+        mensagem.textContent = 'Alteração guardada neste aparelho. Mesmo fechando o navegador, ela continuará pendente até a internet voltar.';
+    }
+}
+
+const familyOfflineSalvarLocalAnterior = salvarLocal;
+salvarLocal = function(dados = listaGastos) {
+    const antesRaw = localStorage.getItem(STORAGE_KEY) || '[]';
+    const antes = familyOfflineParseLista(antesRaw);
+    familyOfflineSalvarLocalAnterior(dados);
+
+    if (!navigator.onLine) {
+        const depois = Array.isArray(dados) ? dados : listaGastos;
+        familyOfflineRegistrarDiff(antes, depois);
+    }
+};
+
+function familyOfflineAplicarPendencias() {
+    if (!navigator.onLine || familyOfflineApplying || familyOfflineWaitingCloud) return;
+
+    const pendencias = familyOfflineLerPendencias();
+    if (!familyOfflineTemPendencias(pendencias)) return;
+
+    const statusAtual = String(document.getElementById('familyCloudStatus')?.textContent || '').trim();
+    if (statusAtual !== 'Sincronizado') return;
+
+    familyOfflineApplying = true;
+    try {
+        const mapa = new Map(listaGastos.filter(g => g?.id).map(g => [String(g.id), normalizarGasto(g)]));
+
+        pendencias.deletes.forEach(id => mapa.delete(String(id)));
+        Object.entries(pendencias.upserts).forEach(([id, gasto]) => {
+            mapa.set(String(id), normalizarGasto({ ...gasto, id }));
+        });
+
+        const mesclados = [...mapa.values()];
+        const antes = JSON.stringify(listaGastos.map(normalizarGasto));
+        const depois = JSON.stringify(mesclados.map(normalizarGasto));
+
+        if (antes === depois) {
+            localStorage.removeItem(FAMILY_OFFLINE_PENDING_KEY);
+            const mensagem = document.getElementById('familyCloudMessage');
+            if (mensagem) mensagem.textContent = 'Dados sincronizados. Não há alterações offline pendentes.';
+            return;
+        }
+
+        listaGastos = mesclados;
+        salvarLocal();
+        popularSelects();
+        popularFiltroAnos();
+        if (typeof popularFiltroCompetencias === 'function') popularFiltroCompetencias();
+        carregarTabela();
+        if (typeof renderAvisoLegado === 'function') renderAvisoLegado();
+
+        const status = document.getElementById('familyCloudStatus');
+        const mensagem = document.getElementById('familyCloudMessage');
+        if (status) {
+            status.textContent = 'Enviando alterações offline...';
+            status.className = 'cloud-status syncing';
+        }
+        if (mensagem) mensagem.textContent = 'Recuperei as alterações feitas sem internet e estou enviando para a nuvem.';
+        familyOfflineWaitingCloud = true;
+    } finally {
+        familyOfflineApplying = false;
+    }
+}
+
+function familyOfflineAcompanharSync() {
+    const status = String(document.getElementById('familyCloudStatus')?.textContent || '').trim();
+
+    if (familyOfflineWaitingCloud && status === 'Sincronizado' && familyOfflineLastStatus !== 'Sincronizado') {
+        localStorage.removeItem(FAMILY_OFFLINE_PENDING_KEY);
+        familyOfflineWaitingCloud = false;
+        const mensagem = document.getElementById('familyCloudMessage');
+        if (mensagem) mensagem.textContent = 'Alterações feitas offline foram enviadas para a nuvem com sucesso.';
+    }
+
+    familyOfflineLastStatus = status;
+
+    if (!familyOfflineWaitingCloud) familyOfflineAplicarPendencias();
+}
+
+setInterval(familyOfflineAcompanharSync, 500);
+window.addEventListener('online', () => setTimeout(familyOfflineAcompanharSync, 300));
