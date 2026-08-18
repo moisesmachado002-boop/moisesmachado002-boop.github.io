@@ -1,0 +1,288 @@
+// Patch 2.6.1 — competência padrão persistente e edição segura de parcelamentos.
+
+const FATURA_PADRAO_KEY = `${STORAGE_KEY}:competenciaFaturaPadrao`;
+
+function obterCompetenciaFaturaPadrao() {
+    try {
+        const salva = localStorage.getItem(FATURA_PADRAO_KEY);
+        if (competenciaValida(salva)) return salva;
+    } catch (erro) {
+        console.warn('Não foi possível ler a fatura padrão:', erro);
+    }
+
+    if (typeof competenciaAtualLocal === 'function') return competenciaAtualLocal();
+    const agora = new Date();
+    return `${agora.getFullYear()}-${String(agora.getMonth() + 1).padStart(2, '0')}`;
+}
+
+function salvarCompetenciaFaturaPadrao(competencia) {
+    if (!competenciaValida(competencia)) return;
+    try {
+        localStorage.setItem(FATURA_PADRAO_KEY, competencia);
+    } catch (erro) {
+        console.warn('Não foi possível salvar a fatura padrão:', erro);
+    }
+}
+
+function aplicarCompetenciaFaturaPadrao() {
+    const competencia = obterCompetenciaFaturaPadrao();
+    if (!competenciaValida(competencia)) return;
+    const [ano, mes] = competencia.split('-');
+    const campoMes = document.getElementById('mesFatura');
+    const campoAno = document.getElementById('anoFatura');
+    if (campoMes) campoMes.value = mes;
+    if (campoAno) campoAno.value = ano;
+}
+
+function registrarPreferenciaFatura() {
+    const atualizar = () => {
+        const competencia = competenciaFormulario();
+        if (competencia) salvarCompetenciaFaturaPadrao(competencia);
+    };
+
+    const campoMes = document.getElementById('mesFatura');
+    const campoAno = document.getElementById('anoFatura');
+
+    if (campoMes && !campoMes.dataset.faturaPadraoConfigurada) {
+        campoMes.dataset.faturaPadraoConfigurada = '1';
+        campoMes.addEventListener('change', atualizar);
+    }
+    if (campoAno && !campoAno.dataset.faturaPadraoConfigurada) {
+        campoAno.dataset.faturaPadraoConfigurada = '1';
+        campoAno.addEventListener('change', atualizar);
+    }
+}
+
+function criarSerieParceladaNoGrupo({ desc, dataIso, competencia, valor, p, c, atual, total, parcelamentoId, idPrimeira = '' }) {
+    const grupo = parcelamentoId || gerarId();
+    const registros = [];
+
+    for (let numero = atual; numero <= total; numero++) {
+        const comp = adicionarMesesCompetencia(competencia, numero - atual);
+        registros.push({
+            id: numero === atual && idPrimeira ? idPrimeira : gerarId(),
+            desc,
+            data: dataIso,
+            dataCompraOriginal: dataIso,
+            mesFatura: comp.slice(5, 7),
+            competenciaFatura: comp,
+            valor,
+            p,
+            c,
+            parcelamentoId: grupo,
+            parcelaAtual: numero,
+            totalParcelas: total,
+            geradaAutomaticamente: numero !== atual,
+            schemaParcelamento: PARCELAMENTO_SCHEMA_VERSION
+        });
+    }
+
+    return registros;
+}
+
+function reconstruirSerieParcelada(gastoAtual, dados) {
+    const antigaAtual = Number(gastoAtual.parcelaAtual);
+    const novaAtual = Number(dados.parcela.atual);
+    const inicioSubstituicao = Math.min(antigaAtual, novaAtual);
+    const grupo = gastoAtual.parcelamentoId;
+
+    const indicesDoGrupo = listaGastos
+        .map((g, index) => ({ g, index }))
+        .filter(({ g }) => g.parcelamentoId === grupo && Number(g.parcelaAtual) >= inicioSubstituicao);
+
+    const posicaoInsercao = indicesDoGrupo.length
+        ? Math.min(...indicesDoGrupo.map(({ index }) => index))
+        : listaGastos.findIndex(g => g.id === gastoAtual.id);
+
+    const idsRemover = new Set(indicesDoGrupo.map(({ g }) => g.id));
+    idsRemover.add(gastoAtual.id);
+    listaGastos = listaGastos.filter(g => !idsRemover.has(g.id));
+
+    const novos = criarSerieParceladaNoGrupo({
+        desc: dados.desc,
+        dataIso: dados.dataIso,
+        competencia: dados.competencia,
+        valor: dados.valor,
+        p: dados.p,
+        c: dados.c,
+        atual: dados.parcela.atual,
+        total: dados.parcela.total,
+        parcelamentoId: grupo,
+        idPrimeira: gastoAtual.id
+    });
+
+    if (posicaoInsercao >= 0 && posicaoInsercao <= listaGastos.length) {
+        listaGastos.splice(posicaoInsercao, 0, ...novos);
+    } else {
+        listaGastos.push(...novos);
+    }
+
+    return novos;
+}
+
+salvarGasto = function() {
+    const desc = document.getElementById('descricao').value.trim();
+    const dataIso = document.getElementById('data').value;
+    const competencia = competenciaFormulario();
+    const valor = Number(document.getElementById('valor').value);
+    const p = document.getElementById('pessoa').value;
+    const c = document.getElementById('cartao').value;
+    const editId = document.getElementById('editId').value;
+    const parcela = dadosParcelamentoFormulario();
+
+    if (!desc || !Number.isFinite(valor) || valor <= 0 || !dataIso) {
+        alert('Por favor, preencha a descrição, data e um valor maior que zero!');
+        return;
+    }
+    if (!competencia) {
+        alert('Informe corretamente o mês e o ano da fatura.');
+        return;
+    }
+
+    const erroParcela = validarParcelamento(parcela);
+    if (erroParcela) {
+        alert(erroParcela);
+        return;
+    }
+
+    salvarCompetenciaFaturaPadrao(competencia);
+
+    if (!editId) {
+        if (parcela.parcelado) {
+            const novos = criarSerieParcelada({ desc, dataIso, competencia, valor, p, c, atual: parcela.atual, total: parcela.total });
+            listaGastos.push(...novos);
+            alert(`${novos.length} parcela(s) registrada(s): ${parcela.atual}/${parcela.total} até ${parcela.total}/${parcela.total}.`);
+        } else {
+            listaGastos.push(criarRegistroBase({ desc, dataIso, competencia, valor, p, c }));
+        }
+    } else {
+        const index = listaGastos.findIndex(g => g.id === editId);
+        if (index === -1) {
+            alert('Este lançamento não foi encontrado. A edição foi cancelada para evitar alterar outro gasto.');
+            cancelarEdicao();
+            return;
+        }
+
+        const atual = listaGastos[index];
+
+        if (gastoParcelado(atual)) {
+            const mudouParcelamento = parcela.parcelado && (
+                Number(parcela.atual) !== Number(atual.parcelaAtual) ||
+                Number(parcela.total) !== Number(atual.totalParcelas)
+            );
+
+            if (mudouParcelamento) {
+                const ok = confirm(
+                    `Alterar de ${atual.parcelaAtual}/${atual.totalParcelas} para ${parcela.atual}/${parcela.total}?\n\n` +
+                    'As parcelas desta compra a partir desse ponto serão reorganizadas automaticamente nas faturas seguintes.'
+                );
+                if (!ok) return;
+
+                reconstruirSerieParcelada(atual, { desc, dataIso, competencia, valor, p, c, parcela });
+            } else {
+                const escopo = escolherEscopoParcelamento('Edição', atual);
+                if (!escopo) return;
+                const alvos = escopo === 'futuras'
+                    ? listaGastos.filter(g => g.parcelamentoId === atual.parcelamentoId && Number(g.parcelaAtual) >= Number(atual.parcelaAtual))
+                    : [atual];
+
+                alvos.forEach(item => {
+                    const deslocamento = escopo === 'futuras' ? Number(item.parcelaAtual) - Number(atual.parcelaAtual) : 0;
+                    const comp = adicionarMesesCompetencia(competencia, deslocamento);
+                    item.desc = desc;
+                    item.data = dataIso;
+                    item.dataCompraOriginal = dataIso;
+                    item.valor = valor;
+                    item.p = p;
+                    item.c = c;
+                    item.competenciaFatura = comp;
+                    item.mesFatura = comp.slice(5, 7);
+                });
+            }
+        } else if (parcela.parcelado) {
+            const novos = criarSerieParcelada({
+                desc, dataIso, competencia, valor, p, c,
+                atual: parcela.atual, total: parcela.total, idPrimeira: atual.id
+            });
+            listaGastos.splice(index, 1, ...novos);
+        } else {
+            listaGastos[index] = {
+                ...atual,
+                desc,
+                data: dataIso,
+                dataCompraOriginal: dataIso,
+                competenciaFatura: competencia,
+                mesFatura: competencia.slice(5, 7),
+                valor,
+                p,
+                c
+            };
+        }
+    }
+
+    salvarLocal();
+    popularFiltroAnos();
+    if (typeof popularFiltroCompetencias === 'function') popularFiltroCompetencias();
+    popularSelects();
+    carregarTabela();
+    limparFormulario();
+    if (typeof renderAvisoLegado === 'function') renderAvisoLegado();
+};
+
+prepararEdicao = function(id) {
+    const g = listaGastos.find(item => item.id === id);
+    if (!g) {
+        alert('Lançamento não encontrado.');
+        carregarTabela();
+        return;
+    }
+
+    popularSelects();
+    document.getElementById('descricao').value = g.desc;
+    document.getElementById('data').value = g.data;
+    document.getElementById('mesFatura').value = g.competenciaFatura ? g.competenciaFatura.slice(5, 7) : (g.mesFatura || '01');
+    document.getElementById('anoFatura').value = g.competenciaFatura ? g.competenciaFatura.slice(0, 4) : String(new Date().getFullYear());
+    document.getElementById('valor').value = g.valor;
+    document.getElementById('pessoa').value = g.p;
+    document.getElementById('cartao').value = g.c;
+    document.getElementById('editId').value = g.id;
+
+    const parcelado = gastoParcelado(g);
+    const check = document.getElementById('ehParcelado');
+    check.disabled = parcelado;
+    alternarCamposParcelamento(parcelado);
+    document.getElementById('parcelaAtual').value = parcelado ? g.parcelaAtual : '';
+    document.getElementById('totalParcelas').value = parcelado ? g.totalParcelas : '';
+
+    // A compra continua marcada como parcelada, mas a numeração agora pode ser corrigida.
+    document.getElementById('parcelaAtual').disabled = false;
+    document.getElementById('totalParcelas').disabled = false;
+
+    document.getElementById('btnAdicionar').innerText = 'Atualizar Gasto';
+    document.getElementById('btnCancelarEdicao').hidden = false;
+    document.getElementById('descricao').focus();
+};
+
+limparFormulario = function() {
+    document.getElementById('descricao').value = '';
+    document.getElementById('valor').value = '';
+    document.getElementById('editId').value = '';
+    document.getElementById('btnAdicionar').innerText = 'Adicionar Gasto';
+    document.getElementById('btnCancelarEdicao').hidden = true;
+
+    const check = document.getElementById('ehParcelado');
+    if (check) check.disabled = false;
+    const atual = document.getElementById('parcelaAtual');
+    const total = document.getElementById('totalParcelas');
+    if (atual) atual.disabled = false;
+    if (total) total.disabled = false;
+    alternarCamposParcelamento(false);
+
+    // A data volta para hoje, mas a competência da fatura permanece na última escolhida.
+    definirDataHoje();
+    aplicarCompetenciaFaturaPadrao();
+    document.getElementById('descricao').focus();
+};
+
+registrarPreferenciaFatura();
+aplicarCompetenciaFaturaPadrao();
