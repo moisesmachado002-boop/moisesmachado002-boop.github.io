@@ -86,6 +86,24 @@
 - [ ] Confirmar no teste final que sair da Gestão Familiar não desloga o Meu Financeiro
 - [ ] Confirmar após sincronização real que a tabela `finance_state` do Meu Financeiro permanece inalterada
 
+## Etapa 10 — Refinamento visual sem alterar mecanismos
+
+- [x] Criar `style.04.txt` isolado para mudanças puramente visuais
+- [x] Manter todos os arquivos `app.*` intactos nesta etapa
+- [x] Manter `body.01.txt` intacto nesta etapa
+- [x] Suavizar fundo geral e reduzir excesso de branco
+- [x] Melhorar container principal, espaçamentos e sombras
+- [x] Melhorar campos, botões e estados de foco
+- [x] Refinar cartões de totais
+- [x] Refinar visual de próximas faturas
+- [x] Refinar filtros e tabela sem alterar conteúdo ou ações
+- [x] Refinar painel de sincronização sem alterar sua lógica
+- [x] Melhorar responsividade visual no celular
+- [x] Preservar impressão sem efeitos visuais desnecessários
+- [x] Ligar `style.04.txt` no `loader.js`
+- [x] Atualizar apenas a versão de cache para `2.2.1`
+- [ ] Avaliar identidade visual específica por banco/cartão sem adicionar lógica de negócio
+
 ## Melhorias futuras
 
 - [ ] Permitir informar valor total da compra e calcular automaticamente o valor das parcelas
@@ -95,3 +113,5 @@
 ## Regra do projeto
 
 Manter a interface conhecida e evoluir por pequenas sprints. Quando uma parte crescer, separar em novos arquivos (`app.02.txt`, `style.02.txt`, etc.) em vez de concentrar tudo em um único arquivo.
+
+Na Etapa 10, alterações são exclusivamente visuais. Não alterar cálculos, parcelamentos, filtros, edição, exclusão, persistência, Supabase, JSON, IDs ou qualquer outro mecanismo do app.
