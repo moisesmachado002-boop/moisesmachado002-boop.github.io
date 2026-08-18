@@ -59,11 +59,27 @@
 
 ## Sprint 3 — Persistência online
 
-- [ ] Definir integração com banco online sem substituir o app atual
-- [ ] Manter JSON como backup de segurança
-- [ ] Planejar migração dos dados locais para banco com rollback
-- [ ] Definir autenticação e isolamento dos dados familiares
-- [ ] Criar sincronização segura entre navegador e banco
+- [x] Inspecionar a integração Supabase já usada pelo Meu Financeiro
+- [x] Confirmar que o Meu Financeiro usa a tabela `finance_state`
+- [x] Definir tabela própria `family_finance_state` para impedir interferência entre os dois sistemas
+- [x] Manter o mesmo projeto/autenticação Supabase, mas dados familiares em tabela separada
+- [x] Manter JSON como backup de segurança
+- [x] Manter `localStorage` como fallback quando estiver sem internet
+- [x] Criar `supabase.sql` com tabela, trigger, permissões e RLS por usuário
+- [x] Criar módulo de nuvem `app.05.txt`
+- [x] Criar estilos da nuvem em `style.03.txt`
+- [x] Preparar login, criação de conta, sair e sincronização manual
+- [x] Preparar sincronização automática após alterações locais
+- [x] Preparar tratamento de conflito inicial entre dados locais e dados da nuvem
+- [x] Manter metadados de sincronização separados por usuário
+- [x] Validar sintaxe de `app.05.txt`
+- [ ] Executar `supabase.sql` no projeto Supabase
+- [ ] Ligar `app.05.txt` e `style.03.txt` no `loader.js`
+- [ ] Atualizar versão para `2.2.0`
+- [ ] Testar login real
+- [ ] Testar upload do backup atual para a nuvem
+- [ ] Testar alteração em um aparelho e recuperação em outro
+- [ ] Confirmar que a tabela `finance_state` do Meu Financeiro permanece inalterada
 
 ## Melhorias futuras
 
