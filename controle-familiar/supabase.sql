@@ -7,9 +7,18 @@ begin;
 create table if not exists public.family_finance_state (
   user_id uuid primary key references auth.users(id) on delete cascade,
   data jsonb not null default '{}'::jsonb,
+  catalog jsonb not null default '{}'::jsonb,
+  catalog_updated_at timestamptz,
   updated_at timestamptz not null default now()
 );
 
+-- Compatibilidade com instalações criadas antes da v2.4.0.
+alter table public.family_finance_state
+  add column if not exists catalog jsonb not null default '{}'::jsonb,
+  add column if not exists catalog_updated_at timestamptz;
+
+-- updated_at pertence aos lançamentos. Alterações apenas no catálogo não devem
+-- fazer a sincronização de gastos interpretar que o JSON de gastos mudou.
 create or replace function public.set_family_finance_state_updated_at()
 returns trigger
 language plpgsql
@@ -17,7 +26,11 @@ security invoker
 set search_path = public
 as $$
 begin
-  new.updated_at = now();
+  if new.data is distinct from old.data then
+    new.updated_at = now();
+  else
+    new.updated_at = old.updated_at;
+  end if;
   return new;
 end;
 $$;
