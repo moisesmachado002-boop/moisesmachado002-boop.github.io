@@ -1,0 +1,213 @@
+/* v2.7.0 - filtro por pessoa no histórico e análise das faturas */
+
+function familyPersonListaDisponivel() {
+    const ativos = typeof familyCatalog !== 'undefined' && Array.isArray(familyCatalog?.pessoas)
+        ? familyCatalog.pessoas
+        : [];
+    const historicos = listaGastos.map(g => g?.p).filter(Boolean);
+    return [...new Set([...ativos, ...historicos])];
+}
+
+function familyPersonCriarFiltroHistorico() {
+    const bar = document.querySelector('.filter-bar');
+    if (!bar || document.getElementById('filtroPessoaHistorico')) return;
+
+    const select = document.createElement('select');
+    select.id = 'filtroPessoaHistorico';
+    select.setAttribute('aria-label', 'Filtrar por pessoa');
+    select.addEventListener('change', () => {
+        const painel = document.getElementById('invoicePaymentPessoa');
+        if (painel && [...painel.options].some(op => op.value === select.value)) {
+            painel.value = select.value;
+        }
+        carregarTabela();
+    });
+
+    const filtroCartao = document.getElementById('filtroCartaoHistorico');
+    if (filtroCartao) bar.insertBefore(select, filtroCartao);
+    else bar.appendChild(select);
+
+    familyPersonPopularFiltroHistorico();
+}
+
+function familyPersonPopularFiltroHistorico() {
+    const select = document.getElementById('filtroPessoaHistorico');
+    if (!select) return;
+
+    const atual = select.value;
+    const pessoas = familyPersonListaDisponivel();
+    select.innerHTML = '<option value="">Todas as pessoas</option>' +
+        pessoas.map(nome => `<option value="${escapeHTML(nome)}">${escapeHTML(nome)}</option>`).join('');
+
+    if (pessoas.includes(atual)) select.value = atual;
+}
+
+function familyPersonGarantirFiltroFaturas() {
+    const head = document.querySelector('#invoicePaymentSection .invoice-payment-head');
+    const competencia = document.getElementById('invoicePaymentCompetencia');
+    if (!head || !competencia) return;
+
+    let filtros = document.getElementById('invoicePaymentFilters');
+    if (!filtros) {
+        filtros = document.createElement('div');
+        filtros.id = 'invoicePaymentFilters';
+        filtros.className = 'invoice-payment-filters';
+        head.appendChild(filtros);
+        filtros.appendChild(competencia);
+    }
+
+    if (!document.getElementById('invoicePaymentPessoa')) {
+        const pessoa = document.createElement('select');
+        pessoa.id = 'invoicePaymentPessoa';
+        pessoa.setAttribute('aria-label', 'Pessoa da fatura');
+        pessoa.addEventListener('change', familyInvoiceRenderPanel);
+        filtros.insertBefore(pessoa, competencia);
+    }
+
+    familyPersonPopularFiltroFaturas();
+}
+
+function familyPersonPopularFiltroFaturas() {
+    const select = document.getElementById('invoicePaymentPessoa');
+    if (!select) return;
+
+    const atual = select.value;
+    const pessoas = familyPersonListaDisponivel();
+    select.innerHTML = '<option value="">Todas as pessoas</option>' +
+        pessoas.map(nome => `<option value="${escapeHTML(nome)}">${escapeHTML(nome)}</option>`).join('');
+
+    if (pessoas.includes(atual)) select.value = atual;
+}
+
+function familyPersonInvoiceTotalCents(competencia, cartao, pessoa) {
+    return listaGastos.reduce((total, gasto) => {
+        if (gasto?.competenciaFatura !== competencia) return total;
+        if (gasto?.c !== cartao) return total;
+        if (gasto?.p !== pessoa) return total;
+        return total + familyInvoiceToCents(gasto.valor);
+    }, 0);
+}
+
+function familyPersonInvoiceQtd(competencia, cartao, pessoa = '') {
+    return listaGastos.filter(gasto => {
+        if (gasto?.competenciaFatura !== competencia) return false;
+        if (cartao && gasto?.c !== cartao) return false;
+        if (pessoa && gasto?.p !== pessoa) return false;
+        return true;
+    }).length;
+}
+
+const familyPersonFiltrarOriginal = filtrarGastos;
+filtrarGastos = function() {
+    const base = familyPersonFiltrarOriginal();
+    const pessoa = document.getElementById('filtroPessoaHistorico')?.value || '';
+    if (!pessoa) return base;
+    return base.filter(gasto => gasto?.p === pessoa);
+};
+
+const familyPersonFiltrosAtivosOriginal = filtrosAtivos;
+filtrosAtivos = function() {
+    return familyPersonFiltrosAtivosOriginal() ||
+        Boolean(document.getElementById('filtroPessoaHistorico')?.value);
+};
+
+const familyPersonInvoiceRenderOriginal = familyInvoiceRenderPanel;
+familyInvoiceRenderPanel = function() {
+    familyPersonGarantirFiltroFaturas();
+
+    const pessoa = document.getElementById('invoicePaymentPessoa')?.value || '';
+    if (!pessoa) {
+        familyPersonInvoiceRenderOriginal();
+        return;
+    }
+
+    const grid = document.getElementById('invoicePaymentGrid');
+    const summary = document.getElementById('invoicePaymentSummary');
+    const select = document.getElementById('invoicePaymentCompetencia');
+    if (!grid || !summary || !select) return;
+
+    familyInvoicePopulatePanelCompetencias();
+    const competencia = select.value;
+    if (!competenciaValida(competencia)) {
+        grid.innerHTML = '<div class="invoice-payment-empty">Nenhuma competência disponível.</div>';
+        summary.innerHTML = '';
+        return;
+    }
+
+    const cartoes = familyInvoiceCardsForCompetencia(competencia)
+        .filter(cartao => familyPersonInvoiceTotalCents(competencia, cartao, pessoa) > 0);
+
+    const totalPessoa = cartoes.reduce(
+        (total, cartao) => total + familyPersonInvoiceTotalCents(competencia, cartao, pessoa),
+        0
+    );
+    const qtdLancamentos = familyPersonInvoiceQtd(competencia, '', pessoa);
+
+    summary.innerHTML = `
+        <div><span>Total de ${escapeHTML(pessoa)} em ${escapeHTML(formatarCompetencia(competencia))}</span><strong>${formatarMoeda(familyInvoiceFromCents(totalPessoa))}</strong></div>
+        <div><span>Cartões usados</span><strong>${cartoes.length}</strong></div>
+        <div><span>Lançamentos</span><strong>${qtdLancamentos}</strong></div>
+    `;
+
+    if (!cartoes.length) {
+        grid.innerHTML = `<div class="invoice-payment-empty">${escapeHTML(pessoa)} não possui lançamentos nesta fatura.</div>`;
+        return;
+    }
+
+    grid.innerHTML = cartoes.map(cartao => {
+        const totalPessoaCartao = familyPersonInvoiceTotalCents(competencia, cartao, pessoa);
+        const totalFaturaCartao = familyInvoiceTotalCents(competencia, cartao);
+        const qtd = familyPersonInvoiceQtd(competencia, cartao, pessoa);
+        const participacao = totalFaturaCartao > 0
+            ? ((totalPessoaCartao / totalFaturaCartao) * 100).toLocaleString('pt-BR', { maximumFractionDigits: 1 })
+            : '0';
+        const compSafe = encodeURIComponent(competencia);
+        const cardSafe = encodeURIComponent(cartao);
+
+        return `<article class="invoice-payment-card person-invoice-card">
+            <div class="invoice-payment-card-head">
+                <strong>${escapeHTML(cartao)}</strong>
+                <span class="invoice-person-badge">${escapeHTML(pessoa)}</span>
+            </div>
+            <div class="invoice-payment-values">
+                <div><span>Gasto da pessoa</span><strong>${formatarMoeda(familyInvoiceFromCents(totalPessoaCartao))}</strong></div>
+                <div><span>Fatura do cartão</span><strong>${formatarMoeda(familyInvoiceFromCents(totalFaturaCartao))}</strong></div>
+                <div><span>Participação</span><strong>${participacao}%</strong></div>
+            </div>
+            <div class="person-invoice-meta">${qtd} lançamento(s) desta pessoa neste cartão</div>
+            <div class="invoice-payment-actions person-mode">
+                <button type="button" class="invoice-view" onclick="familyInvoiceView('${compSafe}','${cardSafe}')">Ver lançamentos</button>
+            </div>
+        </article>`;
+    }).join('');
+};
+
+const familyPersonInvoiceViewOriginal = familyInvoiceView;
+familyInvoiceView = function(...args) {
+    const pessoa = document.getElementById('invoicePaymentPessoa')?.value || '';
+    const resultado = familyPersonInvoiceViewOriginal(...args);
+
+    familyPersonCriarFiltroHistorico();
+    familyPersonPopularFiltroHistorico();
+    const filtroPessoa = document.getElementById('filtroPessoaHistorico');
+    if (filtroPessoa) filtroPessoa.value = pessoa;
+
+    carregarTabela();
+    return resultado;
+};
+
+if (typeof atualizarInterfaceCatalogo === 'function') {
+    const familyPersonAtualizarCatalogoOriginal = atualizarInterfaceCatalogo;
+    atualizarInterfaceCatalogo = function() {
+        familyPersonAtualizarCatalogoOriginal();
+        familyPersonPopularFiltroHistorico();
+        familyPersonPopularFiltroFaturas();
+        familyInvoiceRenderPanel();
+    };
+}
+
+familyPersonCriarFiltroHistorico();
+familyPersonGarantirFiltroFaturas();
+familyPersonPopularFiltroHistorico();
+familyPersonPopularFiltroFaturas();
+carregarTabela();
