@@ -1,0 +1,60 @@
+/* v2.4.0 - reconciliação do catálogo e totais históricos */
+
+const valoresUnicosOriginalV240 = valoresUnicos;
+valoresUnicos = function(base, campo) {
+    if (campo === 'p') {
+        return listaUnicaCatalogo([
+            ...familyCatalog.pessoas,
+            ...listaGastos.map(g => g?.p).filter(Boolean)
+        ]);
+    }
+    if (campo === 'c') {
+        return listaUnicaCatalogo([
+            ...familyCatalog.cartoes,
+            ...listaGastos.map(g => g?.c).filter(Boolean)
+        ]);
+    }
+    return valoresUnicosOriginalV240(base, campo);
+};
+
+async function reconciliarCatalogoComIndexedDB() {
+    if (typeof familyIdbAbrir !== 'function') return;
+    try {
+        const db = await familyIdbAbrir();
+        let salvo = null;
+        try {
+            salvo = await new Promise((resolve, reject) => {
+                const tx = db.transaction(FAMILY_IDB_STORE, 'readonly');
+                const request = tx.objectStore(FAMILY_IDB_STORE).get(FAMILY_CATALOG_IDB_KEY);
+                request.onsuccess = () => resolve(request.result || null);
+                request.onerror = () => reject(request.error);
+            });
+        } finally {
+            db.close();
+        }
+
+        if (!salvo) {
+            await salvarCatalogoIndexedDB().catch(() => {});
+            return;
+        }
+
+        const idb = normalizarCatalogo(salvo);
+        const atual = Date.parse(familyCatalog.updatedAt || '') || 0;
+        const backup = Date.parse(idb.updatedAt || '') || 0;
+
+        if (backup > atual) {
+            familyCatalog = idb;
+            localStorage.setItem(FAMILY_CATALOG_KEY, JSON.stringify(familyCatalog));
+            atualizarInterfaceCatalogo();
+        }
+    } catch (erro) {
+        console.warn('Não foi possível reconciliar a cópia local dos cadastros:', erro);
+    }
+}
+
+reconciliarCatalogoComIndexedDB().finally(() => {
+    try {
+        popularSelects();
+        carregarTabela();
+    } catch {}
+});
