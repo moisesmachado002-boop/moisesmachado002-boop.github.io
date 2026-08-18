@@ -1,19 +1,21 @@
-const CACHE = 'controle-familiar-v2.3.2';
+const CACHE = 'controle-familiar-v2.3.3';
 const STATIC_ASSETS = [
   './index.html',
-  './loader.js?v=2.3.2',
-  './body.01.txt?v=2.3.2',
-  './style.01.txt?v=2.3.2',
-  './style.02.txt?v=2.3.2',
-  './style.03.txt?v=2.3.2',
-  './app.01.txt?v=2.3.2',
-  './app.02.txt?v=2.3.2',
-  './app.03.txt?v=2.3.2',
-  './app.04.txt?v=2.3.2',
-  './app.08.txt?v=2.3.2',
-  './app.05.txt?v=2.3.2',
-  './app.06.txt?v=2.3.2',
-  './app.07.txt?v=2.3.2'
+  './loader.js?v=2.3.3',
+  './body.01.txt?v=2.3.3',
+  './style.01.txt?v=2.3.3',
+  './style.02.txt?v=2.3.3',
+  './style.03.txt?v=2.3.3',
+  './style.04.txt?v=2.3.3',
+  './app.01.txt?v=2.3.3',
+  './app.02.txt?v=2.3.3',
+  './app.03.txt?v=2.3.3',
+  './app.04.txt?v=2.3.3',
+  './app.08.txt?v=2.3.3',
+  './app.05.txt?v=2.3.3',
+  './app.06.txt?v=2.3.3',
+  './app.07.txt?v=2.3.3',
+  './app.09.txt?v=2.3.3'
 ];
 
 self.addEventListener('install', event => {
