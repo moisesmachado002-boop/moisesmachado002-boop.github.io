@@ -30,21 +30,46 @@
 
 ## Sprint 2 — Fatura e parcelamento
 
-- [ ] Criar competência completa da fatura (`AAAA-MM`)
-- [ ] Manter data original da compra separada da competência da fatura
-- [ ] Criar campos de parcela atual e total de parcelas
-- [ ] Criar ID/grupo de parcelamento
-- [ ] Ao lançar `2/6`, gerar automaticamente `3/6`, `4/6`, `5/6` e `6/6` nas competências seguintes
-- [ ] Editar somente uma parcela ou esta e as futuras
-- [ ] Excluir somente uma parcela ou esta e as futuras
-- [ ] Criar resumo de próximas faturas
-- [ ] Mostrar valor já comprometido nos próximos meses
+- [x] Criar competência completa da fatura (`AAAA-MM`)
+- [x] Manter data original da compra separada da competência da fatura
+- [x] Criar campos de parcela atual e total de parcelas
+- [x] Criar ID/grupo de parcelamento
+- [x] Ao lançar `2/6`, registrar `2/6` e gerar automaticamente `3/6`, `4/6`, `5/6` e `6/6` nas competências seguintes
+- [x] Manter o valor informado como valor de cada parcela
+- [x] Editar somente uma parcela ou esta e as futuras
+- [x] Excluir somente uma parcela ou esta e as futuras
+- [x] Criar filtro por competência completa da fatura
+- [x] Criar resumo de próximas faturas
+- [x] Mostrar valor já comprometido nos próximos meses
+- [x] Exibir `parcela/total` na tabela e no relatório
+- [x] Manter `mesFatura` no JSON para compatibilidade com backups antigos
+- [x] Preservar lançamentos antigos sem inventar o ano da fatura
+- [x] Criar conversão manual dos lançamentos antigos para um ano informado pelo usuário
+- [x] Separar Sprint 2 em `app.03.txt`, `app.04.txt` e `style.02.txt`
+- [x] Atualizar aplicação para versão `2.1.0`
+
+### Testes da Sprint 2
+
+- [x] Sintaxe de `app.03.txt` validada
+- [x] Sintaxe de `app.04.txt` validada
+- [x] Teste `2/6` a partir de `2026-08`: gera competências até `2026-12`
+- [x] Teste de virada de ano: `2026-12 + 1 mês = 2027-01`
+- [x] Backup atual testado: 69 registros aceitos estruturalmente
+- [x] Data suspeita `0002-07-07` continua sinalizada e não é alterada automaticamente
 
 ## Sprint 3 — Persistência online
 
 - [ ] Definir integração com banco online sem substituir o app atual
 - [ ] Manter JSON como backup de segurança
 - [ ] Planejar migração dos dados locais para banco com rollback
+- [ ] Definir autenticação e isolamento dos dados familiares
+- [ ] Criar sincronização segura entre navegador e banco
+
+## Melhorias futuras
+
+- [ ] Permitir informar valor total da compra e calcular automaticamente o valor das parcelas
+- [ ] Criar cadastro editável de responsáveis e cartões
+- [ ] Criar histórico/registro de alterações importantes
 
 ## Regra do projeto
 
