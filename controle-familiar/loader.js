@@ -1,10 +1,10 @@
 (async () => {
-  const VERSION = '2.5.0';
+  const VERSION = '2.6.0';
   window.__CONTROLE_FAMILIAR_VERSION = VERSION;
 
   const bodyParts = ["body.01.txt"];
-  const styleParts = ["style.01.txt", "style.02.txt", "style.03.txt", "style.04.txt", "style.05.txt", "style.06.txt"];
-  const appParts = ["app.01.txt", "app.02.txt", "app.03.txt", "app.04.txt", "app.08.txt", "app.10.txt", "app.05.txt", "app.06.txt", "app.07.txt", "app.09.txt", "app.11.txt", "app.12.txt", "app.13.txt"];
+  const styleParts = ["style.01.txt", "style.02.txt", "style.03.txt", "style.04.txt", "style.05.txt", "style.06.txt", "style.07.txt"];
+  const appParts = ["app.01.txt", "app.02.txt", "app.03.txt", "app.04.txt", "app.08.txt", "app.10.txt", "app.05.txt", "app.06.txt", "app.07.txt", "app.09.txt", "app.11.txt", "app.12.txt", "app.13.txt", "app.14.txt"];
 
   const versioned = p => `${p}?v=${VERSION}`;
 

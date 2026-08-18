@@ -1,0 +1,124 @@
+/* v2.6.0 - organização da interface em três abas */
+
+const FAMILY_TAB_VALIDAS = ['lancamentos', 'faturas', 'cadastros'];
+let familyTabAtual = 'lancamentos';
+
+function familyTabsCriarEstrutura() {
+    if (document.getElementById('familyTabsNav')) return;
+
+    const container = document.querySelector('.container');
+    const titulo = container?.querySelector('h2');
+    if (!container || !titulo) return;
+
+    const nav = document.createElement('nav');
+    nav.id = 'familyTabsNav';
+    nav.className = 'family-tabs-nav';
+    nav.setAttribute('role', 'tablist');
+    nav.setAttribute('aria-label', 'Áreas da Gestão Financeira Familiar');
+    nav.innerHTML = `
+        <button type="button" class="family-tab-btn active" data-family-tab="lancamentos" role="tab" aria-selected="true">Lançamentos</button>
+        <button type="button" class="family-tab-btn" data-family-tab="faturas" role="tab" aria-selected="false">Faturas</button>
+        <button type="button" class="family-tab-btn" data-family-tab="cadastros" role="tab" aria-selected="false">Cadastros</button>
+    `;
+
+    const areas = document.createElement('div');
+    areas.id = 'familyTabsAreas';
+    areas.className = 'family-tabs-areas';
+    areas.innerHTML = `
+        <section id="familyTabLancamentos" class="family-tab-panel" data-family-panel="lancamentos" role="tabpanel"></section>
+        <section id="familyTabFaturas" class="family-tab-panel" data-family-panel="faturas" role="tabpanel" hidden></section>
+        <section id="familyTabCadastros" class="family-tab-panel" data-family-panel="cadastros" role="tabpanel" hidden></section>
+    `;
+
+    titulo.insertAdjacentElement('afterend', nav);
+    nav.insertAdjacentElement('afterend', areas);
+
+    nav.querySelectorAll('[data-family-tab]').forEach(botao => {
+        botao.addEventListener('click', () => familyTabsAtivar(botao.dataset.familyTab));
+    });
+
+    familyTabsDistribuirConteudo();
+    familyTabsAtivar('lancamentos');
+}
+
+function familyTabsMover(panelId, seletor) {
+    const panel = document.getElementById(panelId);
+    const elemento = document.querySelector(seletor);
+    if (!panel || !elemento || panel.contains(elemento)) return;
+    panel.appendChild(elemento);
+}
+
+function familyTabsDistribuirConteudo() {
+    familyTabsMover('familyTabLancamentos', '.form-grid');
+    familyTabsMover('familyTabLancamentos', '#totaisDashboard');
+    familyTabsMover('familyTabLancamentos', '.filter-bar');
+    familyTabsMover('familyTabLancamentos', '.table-container');
+
+    familyTabsMover('familyTabFaturas', '#invoicePaymentSection');
+    familyTabsMover('familyTabFaturas', '#proximasFaturasSection');
+
+    familyTabsMover('familyTabCadastros', '#familyCatalogPanel');
+
+    const cadastroPanel = document.getElementById('familyTabCadastros');
+    if (cadastroPanel && !cadastroPanel.querySelector('.family-tab-helper')) {
+        const helper = document.createElement('div');
+        helper.className = 'family-tab-helper';
+        helper.innerHTML = '<strong>Cadastros do sistema</strong><span>Adicione, altere ou remova pessoas e cartões usados nos novos lançamentos.</span>';
+        cadastroPanel.insertAdjacentElement('afterbegin', helper);
+    }
+}
+
+function familyTabsAtivar(tab, { rolar = false } = {}) {
+    const destino = FAMILY_TAB_VALIDAS.includes(tab) ? tab : 'lancamentos';
+    familyTabAtual = destino;
+
+    document.querySelectorAll('[data-family-tab]').forEach(botao => {
+        const ativo = botao.dataset.familyTab === destino;
+        botao.classList.toggle('active', ativo);
+        botao.setAttribute('aria-selected', ativo ? 'true' : 'false');
+    });
+
+    document.querySelectorAll('[data-family-panel]').forEach(panel => {
+        panel.hidden = panel.dataset.familyPanel !== destino;
+    });
+
+    if (destino === 'faturas') {
+        try {
+            if (typeof familyInvoiceRenderPanel === 'function') familyInvoiceRenderPanel();
+            if (typeof renderProximasFaturas === 'function') renderProximasFaturas();
+        } catch (erro) {
+            console.warn('Não foi possível atualizar a aba Faturas:', erro);
+        }
+    }
+
+    if (destino === 'cadastros') {
+        try {
+            if (typeof atualizarInterfaceCatalogo === 'function') atualizarInterfaceCatalogo();
+        } catch (erro) {
+            console.warn('Não foi possível atualizar a aba Cadastros:', erro);
+        }
+    }
+
+    if (rolar) {
+        document.getElementById('familyTabsNav')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+}
+
+/* O botão "Ver lançamentos" da fatura abre a aba certa antes de aplicar os filtros. */
+if (typeof familyInvoiceView === 'function') {
+    const familyInvoiceViewOriginalV260 = familyInvoiceView;
+    familyInvoiceView = function(...args) {
+        familyTabsAtivar('lancamentos');
+        const resultado = familyInvoiceViewOriginalV260(...args);
+        setTimeout(() => {
+            document.querySelector('.filter-bar')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }, 60);
+        return resultado;
+    };
+}
+
+familyTabsCriarEstrutura();
+
+/* Se algum módulo terminar de montar um bloco alguns instantes depois, recoloca na aba correta. */
+setTimeout(familyTabsDistribuirConteudo, 250);
+setTimeout(familyTabsDistribuirConteudo, 1000);
