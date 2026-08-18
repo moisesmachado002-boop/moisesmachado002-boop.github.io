@@ -1,0 +1,133 @@
+/* Hotfix 2.3.4 - segunda copia local persistente em IndexedDB */
+
+const FAMILY_IDB_NAME = 'controle-familiar-local-v1';
+const FAMILY_IDB_STORE = 'snapshots';
+const FAMILY_IDB_KEY = 'gastos';
+
+function familyIdbAbrir() {
+    return new Promise((resolve, reject) => {
+        if (!window.indexedDB) {
+            reject(new Error('IndexedDB indisponível'));
+            return;
+        }
+
+        const request = indexedDB.open(FAMILY_IDB_NAME, 1);
+        request.onupgradeneeded = () => {
+            const db = request.result;
+            if (!db.objectStoreNames.contains(FAMILY_IDB_STORE)) {
+                db.createObjectStore(FAMILY_IDB_STORE);
+            }
+        };
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error || new Error('Falha ao abrir IndexedDB'));
+    });
+}
+
+async function familyIdbLerSnapshot() {
+    const db = await familyIdbAbrir();
+    try {
+        return await new Promise((resolve, reject) => {
+            const tx = db.transaction(FAMILY_IDB_STORE, 'readonly');
+            const request = tx.objectStore(FAMILY_IDB_STORE).get(FAMILY_IDB_KEY);
+            request.onsuccess = () => resolve(request.result || null);
+            request.onerror = () => reject(request.error || new Error('Falha ao ler IndexedDB'));
+        });
+    } finally {
+        db.close();
+    }
+}
+
+async function familyIdbSalvarSnapshot(gastos) {
+    const lista = Array.isArray(gastos) ? gastos.map(normalizarGasto) : [];
+    const db = await familyIdbAbrir();
+    try {
+        await new Promise((resolve, reject) => {
+            const tx = db.transaction(FAMILY_IDB_STORE, 'readwrite');
+            tx.objectStore(FAMILY_IDB_STORE).put({
+                version: String(window.__CONTROLE_FAMILIAR_VERSION || ''),
+                updatedAt: new Date().toISOString(),
+                gastos: lista
+            }, FAMILY_IDB_KEY);
+            tx.oncomplete = () => resolve();
+            tx.onerror = () => reject(tx.error || new Error('Falha ao gravar IndexedDB'));
+            tx.onabort = () => reject(tx.error || new Error('Gravação IndexedDB cancelada'));
+        });
+    } finally {
+        db.close();
+    }
+}
+
+function familyIdbRenderizarRecuperados() {
+    try {
+        popularSelects();
+        popularFiltroAnos();
+        if (typeof popularFiltroCompetencias === 'function') popularFiltroCompetencias();
+        carregarTabela();
+        if (typeof renderAvisoLegado === 'function') renderAvisoLegado();
+        if (typeof renderProximasFaturas === 'function') renderProximasFaturas();
+    } catch (erro) {
+        console.warn('Dados locais recuperados, mas a interface não pôde ser atualizada imediatamente:', erro);
+    }
+}
+
+function familyIdbAvisarRecuperacao(qtd) {
+    const status = document.getElementById('familyCloudStatus');
+    const mensagem = document.getElementById('familyCloudMessage');
+    if (status) {
+        status.textContent = 'Dados locais recuperados';
+        status.className = 'cloud-status offline';
+    }
+    if (mensagem) {
+        mensagem.textContent = `${qtd} lançamento(s) recuperado(s) da cópia local deste aparelho. A nuvem será atualizada quando a internet voltar.`;
+    }
+}
+
+const familyIdbSalvarLocalAnterior = salvarLocal;
+salvarLocal = function(dados = listaGastos) {
+    familyIdbSalvarLocalAnterior(dados);
+    const lista = Array.isArray(dados) ? dados : listaGastos;
+    familyIdbSalvarSnapshot(lista).catch(erro => {
+        console.warn('Não foi possível atualizar a cópia local IndexedDB:', erro);
+    });
+};
+
+window.__FAMILY_IDB_READY = (async () => {
+    try {
+        let local = [];
+        try {
+            const raw = localStorage.getItem(STORAGE_KEY);
+            const parsed = JSON.parse(raw || '[]');
+            local = Array.isArray(parsed) ? parsed.map(normalizarGasto) : [];
+        } catch {
+            local = [];
+        }
+
+        if (local.length > 0) {
+            await familyIdbSalvarSnapshot(local);
+            return { origem: 'localStorage', quantidade: local.length };
+        }
+
+        if (navigator.onLine) {
+            return { origem: 'aguardando-nuvem', quantidade: 0 };
+        }
+
+        const snapshot = await familyIdbLerSnapshot();
+        const recuperados = Array.isArray(snapshot?.gastos)
+            ? snapshot.gastos.map(normalizarGasto)
+            : [];
+
+        if (!recuperados.length) {
+            return { origem: 'sem-backup-local', quantidade: 0 };
+        }
+
+        listaGastos = recuperados;
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(recuperados));
+        familyIdbRenderizarRecuperados();
+        familyIdbAvisarRecuperacao(recuperados.length);
+        window.__FAMILY_IDB_RECOVERED = true;
+        return { origem: 'indexedDB', quantidade: recuperados.length };
+    } catch (erro) {
+        console.warn('Cópia local IndexedDB indisponível:', erro);
+        return { origem: 'erro', quantidade: 0 };
+    }
+})();
