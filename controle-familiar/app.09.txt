@@ -1,0 +1,12 @@
+/* Versão visível na interface */
+(function inserirVersaoVisivel() {
+    const versao = String(window.__CONTROLE_FAMILIAR_VERSION || '').trim();
+    if (!versao || document.getElementById('appVersionBadge')) return;
+
+    const badge = document.createElement('div');
+    badge.id = 'appVersionBadge';
+    badge.className = 'app-version-badge';
+    badge.textContent = `v${versao}`;
+    badge.title = `Gestão Financeira Familiar — versão ${versao}`;
+    document.body.appendChild(badge);
+})();
