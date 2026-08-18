@@ -1,0 +1,106 @@
+/* Etapa 11 — identidade visual dos cartões. Camada apenas visual. */
+(() => {
+  const brandClasses = [
+    'card-brand', 'brand-nubank', 'brand-picpay', 'brand-neon', 'brand-digio',
+    'brand-variant-1', 'brand-variant-2'
+  ];
+
+  function normalizeCardName(value) {
+    return String(value || '')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .trim()
+      .toUpperCase();
+  }
+
+  function identifyCard(value) {
+    const text = normalizeCardName(value);
+    if (!text) return null;
+    if (text.includes('NUBANK')) {
+      const variant = /NUBANK\s*[- ]?2\b/.test(text) ? '2' : (/NUBANK\s*[- ]?1\b/.test(text) ? '1' : '');
+      return { brand: 'nubank', variant };
+    }
+    if (text.includes('PICPAY')) return { brand: 'picpay', variant: '' };
+    if (text.includes('NEON')) return { brand: 'neon', variant: '' };
+    if (text.includes('DIGIO')) return { brand: 'digio', variant: '' };
+    return null;
+  }
+
+  function clearBrand(el) {
+    if (!el) return;
+    el.classList.remove(...brandClasses);
+    delete el.dataset.cardBrand;
+  }
+
+  function applyBrand(el, sourceText) {
+    if (!el) return;
+    clearBrand(el);
+    const info = identifyCard(sourceText);
+    if (!info) return;
+    el.classList.add('card-brand', `brand-${info.brand}`);
+    el.dataset.cardBrand = info.brand;
+    if (info.variant === '1' || info.variant === '2') {
+      el.classList.add(`brand-variant-${info.variant}`);
+    }
+  }
+
+  function brandTotals() {
+    document.querySelectorAll('.card-total').forEach(card => {
+      const title = card.querySelector('.card-total-title')?.textContent || '';
+      if (/cart[aã]o\s*:/i.test(title)) applyBrand(card, title);
+      else clearBrand(card);
+    });
+  }
+
+  function brandHistoryTable() {
+    document.querySelectorAll('#corpoTabela tr').forEach(row => {
+      const cells = row.cells;
+      if (!cells || cells.length < 6) return;
+      applyBrand(cells[5], cells[5].textContent);
+    });
+  }
+
+  function brandVisualCards() {
+    const selectors = [
+      '.invoice-payment-card',
+      '.fatura-futura-card',
+      '.catalog-item',
+      '.card-credit-box'
+    ].join(',');
+
+    document.querySelectorAll(selectors).forEach(el => {
+      applyBrand(el, el.textContent);
+    });
+  }
+
+  function brandCardSelect() {
+    const select = document.getElementById('cartao');
+    if (!select) return;
+    applyBrand(select, select.value);
+    if (!select.dataset.brandListener) {
+      select.dataset.brandListener = '1';
+      select.addEventListener('change', () => applyBrand(select, select.value));
+    }
+  }
+
+  let scheduled = false;
+  function applyAllBranding() {
+    scheduled = false;
+    brandTotals();
+    brandHistoryTable();
+    brandVisualCards();
+    brandCardSelect();
+  }
+
+  function scheduleBranding() {
+    if (scheduled) return;
+    scheduled = true;
+    requestAnimationFrame(applyAllBranding);
+  }
+
+  const observer = new MutationObserver(scheduleBranding);
+  observer.observe(document.body, { childList: true, subtree: true, characterData: true });
+
+  window.__aplicarIdentidadeCartoes = applyAllBranding;
+  applyAllBranding();
+})();
