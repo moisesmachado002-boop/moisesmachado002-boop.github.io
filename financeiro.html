@@ -10,6 +10,15 @@
 </head>
 <body>
   <div style="font-family:system-ui;padding:24px">Carregando Meu Financeiro...</div>
+  <script>
+    if ('serviceWorker' in navigator && location.protocol !== 'file:') {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('./sw.js', { scope: './' })
+          .then(registration => registration.update())
+          .catch(error => console.warn('Modo offline não pôde ser atualizado:', error));
+      });
+    }
+  </script>
   <script src="loader-app.js"></script>
 </body>
 </html>
