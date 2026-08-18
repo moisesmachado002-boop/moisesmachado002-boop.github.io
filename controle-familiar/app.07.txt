@@ -1,0 +1,47 @@
+/* Hotfix 2.3.1 - reabertura offline e retomada da nuvem */
+
+const OFFLINE_AUTH_STORAGE_KEY = 'family-finance-auth-pqcltcegwmyuzytivakt';
+let offlineReloadScheduled = false;
+
+function temSessaoFamiliarSalva() {
+    try {
+        return Boolean(localStorage.getItem(OFFLINE_AUTH_STORAGE_KEY));
+    } catch {
+        return false;
+    }
+}
+
+function statusNuvemAtual() {
+    return String(document.getElementById('familyCloudStatus')?.textContent || '').trim();
+}
+
+function precisaReinicializarNuvem() {
+    const status = statusNuvemAtual();
+    return temSessaoFamiliarSalva() && [
+        'Somente local',
+        'Modo local',
+        'Sem internet',
+        'Nuvem indisponível'
+    ].includes(status);
+}
+
+function agendarRetomadaOnline() {
+    if (offlineReloadScheduled || !navigator.onLine || !precisaReinicializarNuvem()) return;
+    offlineReloadScheduled = true;
+
+    const status = document.getElementById('familyCloudStatus');
+    const mensagem = document.getElementById('familyCloudMessage');
+    if (status) {
+        status.textContent = 'Reconectando...';
+        status.className = 'cloud-status syncing';
+    }
+    if (mensagem) mensagem.textContent = 'A internet voltou. Reconectando para enviar as alterações salvas neste aparelho.';
+
+    setTimeout(() => location.reload(), 350);
+}
+
+window.addEventListener('online', agendarRetomadaOnline);
+
+if (navigator.storage?.persist) {
+    navigator.storage.persist().catch(() => false);
+}
