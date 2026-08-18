@@ -1,0 +1,211 @@
+/* Sprint 4 - acabamento, integridade e confiabilidade offline */
+
+const SPRINT4_AUTH_STORAGE_KEY = 'family-finance-auth-pqcltcegwmyuzytivakt';
+const SPRINT4_CLOUD_META_PREFIX = 'dadosFinanceirosFamiliaresCloudMeta';
+
+function sprint4Centavos(valor) {
+    return Math.round((Number(valor) || 0) * 100);
+}
+
+function sprint4ValorDeCentavos(centavos) {
+    return Number(centavos || 0) / 100;
+}
+
+function sprint4OrdenarGastos(gastos) {
+    return [...gastos].sort((a, b) => {
+        const dataA = String(a?.data || '');
+        const dataB = String(b?.data || '');
+        if (dataA !== dataB) return dataB.localeCompare(dataA);
+
+        const compA = String(a?.competenciaFatura || '');
+        const compB = String(b?.competenciaFatura || '');
+        if (compA !== compB) return compB.localeCompare(compA);
+
+        const parcelaA = Number(a?.parcelaAtual) || 0;
+        const parcelaB = Number(b?.parcelaAtual) || 0;
+        if (parcelaA !== parcelaB) return parcelaB - parcelaA;
+
+        return String(b?.id || '').localeCompare(String(a?.id || ''));
+    });
+}
+
+function sprint4UsuarioSessaoLocal() {
+    try {
+        const bruto = localStorage.getItem(SPRINT4_AUTH_STORAGE_KEY);
+        if (!bruto) return '';
+        const sessao = JSON.parse(bruto);
+        return String(
+            sessao?.user?.id ||
+            sessao?.session?.user?.id ||
+            sessao?.currentSession?.user?.id ||
+            ''
+        );
+    } catch {
+        return '';
+    }
+}
+
+function sprint4MarcarAlteracaoLocal() {
+    const userId = sprint4UsuarioSessaoLocal();
+    if (!userId) return;
+
+    const chave = `${SPRINT4_CLOUD_META_PREFIX}_${userId}`;
+    let meta = {};
+    try {
+        meta = JSON.parse(localStorage.getItem(chave) || '{}');
+    } catch {
+        meta = {};
+    }
+
+    localStorage.setItem(chave, JSON.stringify({
+        ...meta,
+        updatedAt: new Date().toISOString(),
+        userId
+    }));
+
+    if (!navigator.onLine) {
+        const status = document.getElementById('familyCloudStatus');
+        if (status) {
+            status.textContent = 'Salvo neste aparelho';
+            status.className = 'cloud-status offline';
+        }
+        const mensagem = document.getElementById('familyCloudMessage');
+        if (mensagem) mensagem.textContent = 'Alteração salva neste aparelho. Ela será enviada para a nuvem quando a internet voltar.';
+    }
+}
+
+const sprint4SalvarLocalOriginal = salvarLocal;
+salvarLocal = function(dados = listaGastos) {
+    sprint4SalvarLocalOriginal(dados);
+    sprint4MarcarAlteracaoLocal();
+};
+
+function carregarTabela() {
+    const gastosFiltrados = filtrarGastos();
+    const corpo = document.getElementById('corpoTabela');
+    corpo.innerHTML = '';
+
+    if (gastosFiltrados.length === 0) {
+        corpo.innerHTML = '<tr><td colspan="7" class="empty-state">Nenhum gasto encontrado.</td></tr>';
+        atualizarTotais(gastosFiltrados);
+        if (typeof renderProximasFaturas === 'function') renderProximasFaturas();
+        return;
+    }
+
+    const gastosParaExibir = sprint4OrdenarGastos(gastosFiltrados);
+    let html = '';
+    gastosParaExibir.forEach(g => {
+        const idSeguro = encodeURIComponent(g.id);
+        html += `<tr>
+            <td>${descricaoComParcela(g)}</td>
+            <td>${formatarData(g.data)}</td>
+            <td><strong>${escapeHTML(formatarCompetencia(g.competenciaFatura, g.mesFatura))}</strong></td>
+            <td>${formatarMoeda(g.valor)}</td>
+            <td><strong>${escapeHTML(g.p)}</strong></td>
+            <td>${escapeHTML(g.c)}</td>
+            <td style="text-align: center;">
+                <button class="btn-edit" onclick="prepararEdicao(decodeURIComponent('${idSeguro}'))">Editar</button>
+                <button class="btn-del" onclick="removerGasto(decodeURIComponent('${idSeguro}'))">Excluir</button>
+            </td>
+        </tr>`;
+    });
+
+    corpo.innerHTML = html;
+    atualizarTotais(gastosFiltrados);
+    if (typeof renderProximasFaturas === 'function') renderProximasFaturas();
+}
+
+function atualizarTotais(gastos) {
+    let totalGeralCentavos = 0;
+    const pessoas = valoresUnicos(pessoasBase, 'p');
+    const cartoes = valoresUnicos(cartoesBase, 'c');
+    const totaisDono = Object.fromEntries(pessoas.map(p => [p, 0]));
+    const totaisCartao = Object.fromEntries(cartoes.map(c => [c, 0]));
+
+    gastos.forEach(g => {
+        const centavos = sprint4Centavos(g.valor);
+        totalGeralCentavos += centavos;
+        totaisDono[g.p] = (totaisDono[g.p] || 0) + centavos;
+        totaisCartao[g.c] = (totaisCartao[g.c] || 0) + centavos;
+    });
+
+    const mostrarZeros = !filtrosAtivos();
+    let dashboardHTML = `<div class="card-total geral"><div class="card-total-title">Total Geral</div><div class="card-total-value">${formatarMoeda(sprint4ValorDeCentavos(totalGeralCentavos))}</div></div>`;
+
+    Object.keys(totaisDono).forEach(dono => {
+        if (totaisDono[dono] > 0 || mostrarZeros) {
+            dashboardHTML += `<div class="card-total"><div class="card-total-title">${escapeHTML(dono)}</div><div class="card-total-value">${formatarMoeda(sprint4ValorDeCentavos(totaisDono[dono]))}</div></div>`;
+        }
+    });
+
+    Object.keys(totaisCartao).forEach(cartao => {
+        if (totaisCartao[cartao] > 0 || mostrarZeros) {
+            dashboardHTML += `<div class="card-total" style="border-left-color: #d97706;"><div class="card-total-title">Cartão: ${escapeHTML(cartao)}</div><div class="card-total-value">${formatarMoeda(sprint4ValorDeCentavos(totaisCartao[cartao]))}</div></div>`;
+        }
+    });
+
+    document.getElementById('totaisDashboard').innerHTML = dashboardHTML;
+}
+
+function renderProximasFaturas() {
+    const container = document.getElementById('proximasFaturas');
+    if (!container) return;
+
+    const atual = competenciaAtualLocal();
+    const grupos = {};
+    listaGastos.forEach(g => {
+        if (!competenciaValida(g.competenciaFatura) || g.competenciaFatura <= atual) return;
+        if (!grupos[g.competenciaFatura]) grupos[g.competenciaFatura] = { centavos: 0, qtd: 0, parcelas: 0 };
+        grupos[g.competenciaFatura].centavos += sprint4Centavos(g.valor);
+        grupos[g.competenciaFatura].qtd += 1;
+        if (gastoParcelado(g)) grupos[g.competenciaFatura].parcelas += 1;
+    });
+
+    const competencias = Object.keys(grupos).sort().slice(0, 8);
+    if (!competencias.length) {
+        container.innerHTML = '<div class="empty-upcoming">Nenhum valor futuro programado.</div>';
+        return;
+    }
+
+    container.innerHTML = competencias.map(comp => {
+        const info = grupos[comp];
+        const detalhe = info.parcelas
+            ? `${info.qtd} lançamento(s) · ${info.parcelas} parcela(s)`
+            : `${info.qtd} lançamento(s)`;
+        return `<div class="fatura-futura-card">
+            <div class="fatura-futura-mes">${escapeHTML(formatarCompetencia(comp))}</div>
+            <div class="fatura-futura-valor">${formatarMoeda(sprint4ValorDeCentavos(info.centavos))}</div>
+            <div class="fatura-futura-detalhe">${escapeHTML(detalhe)}</div>
+        </div>`;
+    }).join('');
+}
+
+function sprint4VerificarIntegridadeParcelas() {
+    const vistos = new Set();
+    const duplicados = [];
+    const inconsistentes = [];
+
+    listaGastos.forEach(g => {
+        if (!gastoParcelado(g)) return;
+        const chave = `${g.parcelamentoId}|${g.parcelaAtual}`;
+        if (vistos.has(chave)) duplicados.push(g);
+        vistos.add(chave);
+
+        if (!competenciaValida(g.competenciaFatura) || Number(g.parcelaAtual) > Number(g.totalParcelas)) {
+            inconsistentes.push(g);
+        }
+    });
+
+    if (duplicados.length || inconsistentes.length) {
+        console.warn('Diagnóstico Sprint 4: inconsistências em parcelamentos', { duplicados, inconsistentes });
+    }
+
+    return {
+        parcelados: listaGastos.filter(gastoParcelado).length,
+        duplicados: duplicados.length,
+        inconsistentes: inconsistentes.length
+    };
+}
+
+sprint4VerificarIntegridadeParcelas();
+carregarTabela();
