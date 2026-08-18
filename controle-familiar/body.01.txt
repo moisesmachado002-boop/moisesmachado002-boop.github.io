@@ -1,0 +1,126 @@
+<div class="container">
+    <div class="print-header">
+        <p id="dataEmissao" style="font-size: 11px; color: #4b5563; margin-top: 4px;"></p>
+    </div>
+
+    <h2>Controle Financeiro Familiar</h2>
+    
+    <div class="form-grid">
+        <input type="hidden" id="editId" value="">
+    <div class="form-group">
+            <label for="mesFatura">Mês da Fatura</label>
+            <select id="mesFatura" class="campo-teclado" data-next="valor">
+                <option value="01">Janeiro</option>
+                <option value="02">Fevereiro</option>
+                <option value="03">Março</option>
+                <option value="04">Abril</option>
+                <option value="05">Maio</option>
+                <option value="06">Junho</option>
+                <option value="07">Julho</option>
+                <option value="08">Agosto</option>
+                <option value="09">Setembro</option>
+                <option value="10">Outubro</option>
+                <option value="11">Novembro</option>
+                <option value="12">Dezembro</option>
+            </select>
+        </div>
+
+        <div class="form-group">
+            <label for="descricao">Descrição (Local)</label>
+            <input type="text" id="descricao" class="campo-teclado" placeholder="Ex: UBER, Mercado" data-next="data">
+        </div>
+
+        <div class="form-group">
+            <label for="data">Data</label>
+            <input type="date" id="data" class="campo-teclado" data-next="mesFatura">
+        </div>
+
+        <div class="form-group">
+            <label for="valor">Valor (R$)</label>
+            <input type="number" id="valor" class="campo-teclado" step="0.01" placeholder="0,00" data-next="pessoa">
+        </div>
+
+        <div class="form-group">
+            <label for="pessoa">Responsável (Dono)</label>
+            <select id="pessoa" class="campo-teclado" data-next="cartao"></select>
+        </div>
+
+        <div class="form-group">
+            <label for="cartao">Cartão</label>
+            <select id="cartao" class="campo-teclado" data-next="btnAdicionar"></select>
+        </div>
+
+        <div class="form-actions">
+            <button id="btnAdicionar" class="btn-add" onclick="salvarGasto()">Adicionar Gasto</button>
+            <button id="btnCancelarEdicao" class="btn-secondary btn-cancel-edit" type="button" onclick="cancelarEdicao()" hidden>Cancelar edição</button>
+        </div>
+    </div>
+
+    <div class="totais-dashboard" id="totaisDashboard"></div>
+
+    <div class="filter-bar">
+        <input type="text" id="inputPesquisa" placeholder="Pesquisar descrição..." oninput="carregarTabela()">
+        <select id="filtroMes" onchange="carregarTabela()">
+            <option value="">Filtrar Mês Gasto</option>
+            <option value="01">Janeiro</option>
+            <option value="02">Fevereiro</option>
+            <option value="03">Março</option>
+            <option value="04">Abril</option>
+            <option value="05">Maio</option>
+            <option value="06">Junho</option>
+            <option value="07">Julho</option>
+            <option value="08">Agosto</option>
+            <option value="09">Setembro</option>
+            <option value="10">Outubro</option>
+            <option value="11">Novembro</option>
+            <option value="12">Dezembro</option>
+        </select>
+        <select id="filtroFatura" onchange="carregarTabela()">
+            <option value="">Filtrar Mês da Fatura</option>
+            <option value="01">Janeiro</option>
+            <option value="02">Fevereiro</option>
+            <option value="03">Março</option>
+            <option value="04">Abril</option>
+            <option value="05">Maio</option>
+            <option value="06">Junho</option>
+            <option value="07">Julho</option>
+            <option value="08">Agosto</option>
+            <option value="09">Setembro</option>
+            <option value="10">Outubro</option>
+            <option value="11">Novembro</option>
+            <option value="12">Dezembro</option>
+        </select>
+        <select id="filtroAno" onchange="carregarTabela()">
+            <option value="">Todos os Anos</option>
+        </select>
+    </div>
+
+    <div class="table-container">
+        <table id="tabelaGastos">
+            <thead>
+                <tr>
+                    <th>Descrição</th>
+                    <th>Data</th>
+                    <th>Mês Fatura</th>
+                    <th>Valor</th>
+                    <th>Dono</th>
+                    <th>Cartão</th>
+                    <th style="text-align: center;">Ações</th>
+                </tr>
+            </thead>
+            <tbody id="corpoTabela"></tbody>
+        </table>
+    </div>
+
+    <div class="actions-footer">
+        <button class="btn-pdf" onclick="gerarPDF()">Gerar Relatório PDF / Imprimir</button>
+        <div class="backup-buttons">
+            <button class="btn-secondary" onclick="exportarJSON()">Exportar JSON</button>
+            <label class="btn-secondary file-upload-label">
+                Importar JSON <input type="file" id="importFile" accept=".json" onchange="importarJSON(event)" style="display: none;">
+            </label>
+        </div>
+    </div>
+
+    <div id="totaisContainerPrint" class="totais-print"></div>
+</div>
