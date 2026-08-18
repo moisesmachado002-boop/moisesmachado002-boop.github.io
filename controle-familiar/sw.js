@@ -18,7 +18,8 @@ const STATIC_ASSETS = [
   './app.06.txt?v=2.4.0',
   './app.07.txt?v=2.4.0',
   './app.09.txt?v=2.4.0',
-  './app.11.txt?v=2.4.0'
+  './app.11.txt?v=2.4.0',
+  './app.12.txt?v=2.4.0'
 ];
 
 self.addEventListener('install', event => {
