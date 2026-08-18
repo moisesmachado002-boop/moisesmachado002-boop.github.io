@@ -1,0 +1,153 @@
+/* Etapa 11 — identidade visual por cartão
+   SOMENTE APARÊNCIA. Não altera cálculos, dados, parcelas ou sincronização. */
+
+.card-brand{
+  --card-brand:#64748b;
+  --card-brand-soft:#f8fafc;
+  --card-brand-ink:#334155;
+  --card-mark:"•";
+}
+
+.brand-nubank{
+  --card-brand:#820ad1;
+  --card-brand-soft:#f6edff;
+  --card-brand-ink:#5f0f9c;
+  --card-mark:"nu";
+}
+.brand-nubank.brand-variant-2{
+  --card-brand:#a12ed0;
+  --card-brand-soft:#fbf0ff;
+  --card-brand-ink:#7513a3;
+  --card-mark:"nu²";
+}
+.brand-picpay{
+  --card-brand:#11b86b;
+  --card-brand-soft:#ecfdf5;
+  --card-brand-ink:#087b4b;
+  --card-mark:"P";
+}
+.brand-neon{
+  --card-brand:#00a8e8;
+  --card-brand-soft:#eafaff;
+  --card-brand-ink:#007fae;
+  --card-mark:"N";
+}
+.brand-digio{
+  --card-brand:#1267e8;
+  --card-brand-soft:#edf5ff;
+  --card-brand-ink:#084cae;
+  --card-mark:"d";
+}
+
+/* Totais por cartão */
+.card-total.card-brand{
+  position:relative;
+  overflow:hidden;
+  border-left-color:var(--card-brand)!important;
+  background:linear-gradient(135deg,var(--card-brand-soft) 0%,#fff 72%);
+}
+.card-total.card-brand::after{
+  content:var(--card-mark);
+  position:absolute;
+  right:10px;
+  top:9px;
+  min-width:24px;
+  height:24px;
+  padding:0 5px;
+  display:grid;
+  place-items:center;
+  border-radius:8px;
+  background:var(--card-brand);
+  color:#fff;
+  font-size:10px;
+  line-height:1;
+  font-weight:900;
+  letter-spacing:-.03em;
+  box-shadow:0 5px 13px color-mix(in srgb,var(--card-brand) 24%,transparent);
+}
+.card-total.card-brand .card-total-title{
+  padding-right:38px;
+  color:var(--card-brand-ink);
+}
+.card-total.card-brand .card-total-value{color:var(--card-brand-ink)}
+
+/* Histórico: destaca somente a célula do cartão */
+#corpoTabela td.card-brand{
+  position:relative;
+  font-weight:800;
+  color:var(--card-brand-ink);
+  background:linear-gradient(90deg,var(--card-brand-soft),transparent 86%);
+  box-shadow:inset 3px 0 0 var(--card-brand);
+}
+#corpoTabela td.card-brand::before{
+  content:var(--card-mark);
+  display:inline-grid;
+  place-items:center;
+  min-width:20px;
+  height:20px;
+  padding:0 3px;
+  margin-right:6px;
+  border-radius:7px;
+  background:var(--card-brand);
+  color:#fff;
+  font-size:9px;
+  font-weight:900;
+  vertical-align:middle;
+}
+
+/* Faturas, limites, catálogo de cartões e próximas faturas.
+   A borda esquerda de status das faturas continua intacta. */
+.invoice-payment-card.card-brand,
+.fatura-futura-card.card-brand,
+.catalog-item.card-brand,
+.card-credit-box.card-brand{
+  position:relative;
+  border-top:3px solid var(--card-brand)!important;
+  background-image:linear-gradient(180deg,var(--card-brand-soft),#fff 62%);
+}
+.invoice-payment-card.card-brand::before,
+.fatura-futura-card.card-brand::before,
+.catalog-item.card-brand::before,
+.card-credit-box.card-brand::before{
+  content:var(--card-mark);
+  position:absolute;
+  top:8px;
+  right:9px;
+  z-index:2;
+  min-width:23px;
+  height:23px;
+  padding:0 4px;
+  display:grid;
+  place-items:center;
+  border-radius:8px;
+  background:var(--card-brand);
+  color:#fff;
+  font-size:9px;
+  font-weight:900;
+  line-height:1;
+  pointer-events:none;
+}
+.invoice-payment-card.card-brand .invoice-payment-card-head,
+.fatura-futura-card.card-brand > :first-child,
+.catalog-item.card-brand > :first-child,
+.card-credit-box.card-brand > :first-child{padding-right:34px}
+
+/* Seletor de cartão no lançamento */
+#cartao.card-brand{
+  border-color:var(--card-brand)!important;
+  background:linear-gradient(90deg,var(--card-brand-soft),#fff 48%);
+  color:var(--card-brand-ink);
+  font-weight:800;
+  box-shadow:0 0 0 3px color-mix(in srgb,var(--card-brand) 10%,transparent);
+}
+#cartao option{font-weight:600;color:#0f172a;background:#fff}
+
+/* Mantém boa leitura no celular */
+@media(max-width:520px){
+  .card-total.card-brand::after{right:8px;top:8px}
+  #corpoTabela td.card-brand{white-space:nowrap}
+}
+
+@media print{
+  .card-brand{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+}
