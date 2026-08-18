@@ -1,5 +1,5 @@
 (async () => {
-  const VERSION = '2.8.3';
+  const VERSION = '2.8.4';
   window.__CONTROLE_FAMILIAR_VERSION = VERSION;
 
   const bodyParts = ["body.01.txt"];
@@ -11,7 +11,7 @@
   const readParts = async parts => (
     await Promise.all(
       parts.map(p =>
-        fetch(versioned(p)).then(r => {
+        fetch(versioned(p), { cache: 'no-store' }).then(r => {
           if (!r.ok) throw new Error(`Falha ao carregar ${p}`);
           return r.text();
         })
