@@ -1,0 +1,429 @@
+/* v2.4.0 - gerenciamento de pessoas e cartões */
+
+const FAMILY_CATALOG_KEY = 'family-finance-catalog-v1';
+const FAMILY_CATALOG_IDB_KEY = 'catalog';
+const FAMILY_CATALOG_TABLE = 'family_finance_state';
+const FAMILY_CATALOG_SUPABASE_URL = 'https://pqcltcegwmyuzytivakt.supabase.co';
+const FAMILY_CATALOG_SUPABASE_KEY = 'sb_publishable_3B61vWHjC_Qu3ksO0GJVXA_d_ytJyop';
+const FAMILY_CATALOG_AUTH_STORAGE_KEY = 'family-finance-auth-pqcltcegwmyuzytivakt';
+
+let familyCatalog = carregarCatalogoLocal();
+let familyCatalogTipoAtual = 'pessoa';
+let familyCatalogClient = null;
+let familyCatalogUser = null;
+let familyCatalogSyncing = false;
+let familyCatalogPoll = null;
+
+function limparNomeCatalogo(valor) {
+    return String(valor || '').replace(/\s+/g, ' ').trim();
+}
+
+function listaUnicaCatalogo(lista) {
+    const saida = [];
+    const vistos = new Set();
+    (Array.isArray(lista) ? lista : []).forEach(item => {
+        const nome = limparNomeCatalogo(item);
+        if (!nome) return;
+        const chave = nome.toLocaleLowerCase('pt-BR');
+        if (vistos.has(chave)) return;
+        vistos.add(chave);
+        saida.push(nome);
+    });
+    return saida;
+}
+
+function catalogoInicial() {
+    return {
+        pessoas: listaUnicaCatalogo([...pessoasBase, ...listaGastos.map(g => g?.p).filter(Boolean)]),
+        cartoes: listaUnicaCatalogo([...cartoesBase, ...listaGastos.map(g => g?.c).filter(Boolean)]),
+        updatedAt: null
+    };
+}
+
+function normalizarCatalogo(raw) {
+    const base = catalogoInicial();
+    const source = raw && typeof raw === 'object' ? raw : {};
+    return {
+        pessoas: listaUnicaCatalogo(Array.isArray(source.pessoas) ? source.pessoas : base.pessoas),
+        cartoes: listaUnicaCatalogo(Array.isArray(source.cartoes) ? source.cartoes : base.cartoes),
+        updatedAt: source.updatedAt || null
+    };
+}
+
+function carregarCatalogoLocal() {
+    try {
+        const bruto = localStorage.getItem(FAMILY_CATALOG_KEY);
+        if (!bruto) {
+            const inicial = catalogoInicial();
+            localStorage.setItem(FAMILY_CATALOG_KEY, JSON.stringify(inicial));
+            return inicial;
+        }
+        return normalizarCatalogo(JSON.parse(bruto));
+    } catch {
+        return catalogoInicial();
+    }
+}
+
+async function salvarCatalogoIndexedDB() {
+    if (typeof familyIdbAbrir !== 'function') return;
+    const db = await familyIdbAbrir();
+    try {
+        await new Promise((resolve, reject) => {
+            const tx = db.transaction(FAMILY_IDB_STORE, 'readwrite');
+            tx.objectStore(FAMILY_IDB_STORE).put(familyCatalog, FAMILY_CATALOG_IDB_KEY);
+            tx.oncomplete = resolve;
+            tx.onerror = () => reject(tx.error || new Error('Falha ao salvar catálogo'));
+            tx.onabort = () => reject(tx.error || new Error('Catálogo cancelado'));
+        });
+    } finally {
+        db.close();
+    }
+}
+
+async function recuperarCatalogoIndexedDB() {
+    if (localStorage.getItem(FAMILY_CATALOG_KEY) || typeof familyIdbAbrir !== 'function') return;
+    try {
+        const db = await familyIdbAbrir();
+        let salvo = null;
+        try {
+            salvo = await new Promise((resolve, reject) => {
+                const tx = db.transaction(FAMILY_IDB_STORE, 'readonly');
+                const request = tx.objectStore(FAMILY_IDB_STORE).get(FAMILY_CATALOG_IDB_KEY);
+                request.onsuccess = () => resolve(request.result || null);
+                request.onerror = () => reject(request.error);
+            });
+        } finally {
+            db.close();
+        }
+        if (salvo) {
+            familyCatalog = normalizarCatalogo(salvo);
+            localStorage.setItem(FAMILY_CATALOG_KEY, JSON.stringify(familyCatalog));
+        }
+    } catch {}
+}
+
+function salvarCatalogoLocal(marcarAlteracao = true) {
+    if (marcarAlteracao) familyCatalog.updatedAt = new Date().toISOString();
+    familyCatalog = normalizarCatalogo(familyCatalog);
+    localStorage.setItem(FAMILY_CATALOG_KEY, JSON.stringify(familyCatalog));
+    salvarCatalogoIndexedDB().catch(() => {});
+    atualizarInterfaceCatalogo();
+    if (navigator.onLine) setTimeout(() => sincronizarCatalogo(false), 100);
+}
+
+function listaCatalogo(tipo) {
+    return tipo === 'pessoa' ? familyCatalog.pessoas : familyCatalog.cartoes;
+}
+
+function definirListaCatalogo(tipo, lista) {
+    if (tipo === 'pessoa') familyCatalog.pessoas = listaUnicaCatalogo(lista);
+    else familyCatalog.cartoes = listaUnicaCatalogo(lista);
+}
+
+function campoGastoCatalogo(tipo) {
+    return tipo === 'pessoa' ? 'p' : 'c';
+}
+
+function usosCatalogo(tipo, nome) {
+    const campo = campoGastoCatalogo(tipo);
+    return listaGastos.filter(g => String(g?.[campo] || '') === nome).length;
+}
+
+const popularSelectsOriginalCatalogo = popularSelects;
+popularSelects = function() {
+    const selectPessoa = document.getElementById('pessoa');
+    const selectCartao = document.getElementById('cartao');
+    if (!selectPessoa || !selectCartao) return popularSelectsOriginalCatalogo();
+
+    const pessoaAtual = selectPessoa.value;
+    const cartaoAtual = selectCartao.value;
+    const pessoas = familyCatalog.pessoas.length ? familyCatalog.pessoas : catalogoInicial().pessoas;
+    const cartoes = familyCatalog.cartoes.length ? familyCatalog.cartoes : catalogoInicial().cartoes;
+
+    selectPessoa.innerHTML = pessoas.map(nome => `<option value="${escapeHTML(nome)}">${escapeHTML(nome)}</option>`).join('');
+    selectCartao.innerHTML = cartoes.map(nome => `<option value="${escapeHTML(nome)}">${escapeHTML(nome)}</option>`).join('');
+
+    if (pessoas.includes(pessoaAtual)) selectPessoa.value = pessoaAtual;
+    if (cartoes.includes(cartaoAtual)) selectCartao.value = cartaoAtual;
+};
+
+function atualizarInterfaceCatalogo() {
+    try {
+        popularSelects();
+        carregarTabela();
+        if (typeof renderProximasFaturas === 'function') renderProximasFaturas();
+        renderizarModalCatalogo();
+    } catch (erro) {
+        console.warn('Falha ao atualizar cadastros na tela:', erro);
+    }
+}
+
+function criarPainelCatalogo() {
+    if (document.getElementById('familyCatalogPanel')) return;
+    const totais = document.getElementById('totaisDashboard');
+    if (!totais?.parentNode) return;
+
+    const painel = document.createElement('section');
+    painel.id = 'familyCatalogPanel';
+    painel.className = 'catalog-panel';
+    painel.innerHTML = `
+        <div class="catalog-panel-text">
+            <strong>Cadastros</strong>
+            <span>Pessoas e cartões disponíveis para novos lançamentos.</span>
+        </div>
+        <div class="catalog-panel-actions">
+            <button type="button" class="btn-secondary" data-catalogo="pessoa">Pessoas</button>
+            <button type="button" class="btn-secondary" data-catalogo="cartao">Cartões</button>
+        </div>`;
+    totais.parentNode.insertBefore(painel, totais);
+    painel.querySelectorAll('[data-catalogo]').forEach(btn => {
+        btn.addEventListener('click', () => abrirCatalogo(btn.dataset.catalogo));
+    });
+}
+
+function criarModalCatalogo() {
+    if (document.getElementById('familyCatalogModal')) return;
+    const modal = document.createElement('div');
+    modal.id = 'familyCatalogModal';
+    modal.className = 'catalog-modal-backdrop';
+    modal.hidden = true;
+    modal.innerHTML = `
+        <div class="catalog-modal" role="dialog" aria-modal="true" aria-labelledby="familyCatalogTitle">
+            <div class="catalog-modal-head">
+                <div>
+                    <h3 id="familyCatalogTitle">Cadastros</h3>
+                    <p id="familyCatalogSubtitle"></p>
+                </div>
+                <button type="button" id="familyCatalogClose" class="catalog-close" aria-label="Fechar">×</button>
+            </div>
+            <div class="catalog-add-row">
+                <input id="familyCatalogNew" type="text" maxlength="60">
+                <button id="familyCatalogAdd" type="button" class="btn-secondary">Adicionar</button>
+            </div>
+            <div id="familyCatalogList" class="catalog-list"></div>
+        </div>`;
+    document.body.appendChild(modal);
+
+    document.getElementById('familyCatalogClose').addEventListener('click', fecharCatalogo);
+    modal.addEventListener('click', e => { if (e.target === modal) fecharCatalogo(); });
+    document.getElementById('familyCatalogAdd').addEventListener('click', adicionarCatalogo);
+    document.getElementById('familyCatalogNew').addEventListener('keydown', e => {
+        if (e.key === 'Enter') adicionarCatalogo();
+    });
+}
+
+function abrirCatalogo(tipo) {
+    familyCatalogTipoAtual = tipo === 'cartao' ? 'cartao' : 'pessoa';
+    renderizarModalCatalogo();
+    document.getElementById('familyCatalogModal').hidden = false;
+    document.getElementById('familyCatalogNew').focus();
+}
+
+function fecharCatalogo() {
+    const modal = document.getElementById('familyCatalogModal');
+    if (modal) modal.hidden = true;
+}
+
+function renderizarModalCatalogo() {
+    const list = document.getElementById('familyCatalogList');
+    if (!list) return;
+    const pessoa = familyCatalogTipoAtual === 'pessoa';
+    document.getElementById('familyCatalogTitle').textContent = pessoa ? 'Pessoas' : 'Cartões';
+    document.getElementById('familyCatalogSubtitle').textContent = pessoa
+        ? 'Adicione, renomeie ou remova pessoas dos novos lançamentos.'
+        : 'Adicione, renomeie ou remova cartões dos novos lançamentos.';
+    document.getElementById('familyCatalogNew').placeholder = pessoa ? 'Nome da pessoa' : 'Nome do cartão';
+
+    const itens = listaCatalogo(familyCatalogTipoAtual);
+    if (!itens.length) {
+        list.innerHTML = '<div class="catalog-empty">Nenhum cadastro ativo.</div>';
+        return;
+    }
+
+    list.innerHTML = itens.map(nome => {
+        const usos = usosCatalogo(familyCatalogTipoAtual, nome);
+        const seguro = encodeURIComponent(nome);
+        return `<div class="catalog-item">
+            <div class="catalog-item-name">
+                <strong>${escapeHTML(nome)}</strong>
+                <span>${usos ? `${usos} lançamento(s) no histórico` : 'Sem lançamentos'}</span>
+            </div>
+            <div class="catalog-item-actions">
+                <button type="button" class="catalog-edit" onclick="renomearCatalogo('${familyCatalogTipoAtual}', decodeURIComponent('${seguro}'))">Editar</button>
+                <button type="button" class="catalog-delete" onclick="removerCatalogo('${familyCatalogTipoAtual}', decodeURIComponent('${seguro}'))">Remover</button>
+            </div>
+        </div>`;
+    }).join('');
+}
+
+function adicionarCatalogo() {
+    const input = document.getElementById('familyCatalogNew');
+    let nome = limparNomeCatalogo(input.value);
+    if (familyCatalogTipoAtual === 'cartao') nome = nome.toUpperCase();
+    if (!nome) return;
+
+    const itens = listaCatalogo(familyCatalogTipoAtual);
+    if (itens.some(item => item.toLocaleLowerCase('pt-BR') === nome.toLocaleLowerCase('pt-BR'))) {
+        alert('Esse cadastro já existe.');
+        return;
+    }
+
+    definirListaCatalogo(familyCatalogTipoAtual, [...itens, nome]);
+    input.value = '';
+    salvarCatalogoLocal(true);
+}
+
+function renomearCatalogo(tipo, nomeAtual) {
+    const itens = listaCatalogo(tipo);
+    if (!itens.includes(nomeAtual)) return;
+
+    let novo = limparNomeCatalogo(prompt(`Novo nome para ${nomeAtual}:`, nomeAtual));
+    if (!novo || novo === nomeAtual) return;
+    if (tipo === 'cartao') novo = novo.toUpperCase();
+
+    if (itens.some(item => item !== nomeAtual && item.toLocaleLowerCase('pt-BR') === novo.toLocaleLowerCase('pt-BR'))) {
+        alert('Já existe outro cadastro com esse nome.');
+        return;
+    }
+
+    const usos = usosCatalogo(tipo, nomeAtual);
+    if (usos && !confirm(`Existem ${usos} lançamento(s) usando “${nomeAtual}”.\n\nAo renomear, esses lançamentos antigos também passarão a usar “${novo}”. Continuar?`)) return;
+
+    const campo = campoGastoCatalogo(tipo);
+    listaGastos.forEach(g => { if (g[campo] === nomeAtual) g[campo] = novo; });
+    definirListaCatalogo(tipo, itens.map(item => item === nomeAtual ? novo : item));
+    salvarLocal();
+    salvarCatalogoLocal(true);
+}
+
+function removerCatalogo(tipo, nome) {
+    const itens = listaCatalogo(tipo);
+    if (!itens.includes(nome)) return;
+    if (itens.length <= 1) {
+        alert('Mantenha pelo menos um cadastro ativo.');
+        return;
+    }
+
+    const usos = usosCatalogo(tipo, nome);
+    const detalhe = usos
+        ? `\n\nOs ${usos} lançamento(s) antigos continuarão no histórico. “${nome}” apenas deixará de aparecer em novos lançamentos.`
+        : '';
+    if (!confirm(`Remover “${nome}” do cadastro?${detalhe}`)) return;
+
+    definirListaCatalogo(tipo, itens.filter(item => item !== nome));
+    salvarCatalogoLocal(true);
+}
+
+async function garantirSupabaseCatalogo() {
+    if (window.supabase?.createClient) return;
+    await new Promise((resolve, reject) => {
+        const scriptExistente = [...document.scripts].find(s => String(s.src || '').includes('@supabase/supabase-js'));
+        if (scriptExistente) {
+            const timer = setInterval(() => {
+                if (window.supabase?.createClient) {
+                    clearInterval(timer);
+                    resolve();
+                }
+            }, 50);
+            setTimeout(() => {
+                clearInterval(timer);
+                if (window.supabase?.createClient) resolve();
+                else reject(new Error('Supabase indisponível'));
+            }, 5000);
+            return;
+        }
+        const script = document.createElement('script');
+        script.src = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2';
+        script.onload = resolve;
+        script.onerror = reject;
+        document.head.appendChild(script);
+    });
+}
+
+function catalogoRemotoValido(valor) {
+    return Boolean(valor && typeof valor === 'object' && Array.isArray(valor.pessoas) && Array.isArray(valor.cartoes));
+}
+
+async function sincronizarCatalogo(silencioso = true) {
+    if (!navigator.onLine || !familyCatalogClient || !familyCatalogUser || familyCatalogSyncing) return;
+    familyCatalogSyncing = true;
+    try {
+        const { data: row, error } = await familyCatalogClient
+            .from(FAMILY_CATALOG_TABLE)
+            .select('catalog, catalog_updated_at')
+            .eq('user_id', familyCatalogUser.id)
+            .maybeSingle();
+        if (error) throw error;
+
+        const remotoValido = catalogoRemotoValido(row?.catalog);
+        const remotoAt = Date.parse(row?.catalog_updated_at || '') || 0;
+        const localAt = Date.parse(familyCatalog.updatedAt || '') || 0;
+
+        if (remotoValido && remotoAt > localAt) {
+            familyCatalog = normalizarCatalogo({ ...row.catalog, updatedAt: row.catalog_updated_at });
+            localStorage.setItem(FAMILY_CATALOG_KEY, JSON.stringify(familyCatalog));
+            await salvarCatalogoIndexedDB().catch(() => {});
+            atualizarInterfaceCatalogo();
+            return;
+        }
+
+        if (!remotoValido || localAt >= remotoAt) {
+            const atualizado = familyCatalog.updatedAt || new Date().toISOString();
+            familyCatalog.updatedAt = atualizado;
+            const { error: saveError } = await familyCatalogClient
+                .from(FAMILY_CATALOG_TABLE)
+                .upsert({
+                    user_id: familyCatalogUser.id,
+                    catalog: { pessoas: familyCatalog.pessoas, cartoes: familyCatalog.cartoes },
+                    catalog_updated_at: atualizado
+                }, { onConflict: 'user_id' });
+            if (saveError) throw saveError;
+            localStorage.setItem(FAMILY_CATALOG_KEY, JSON.stringify(familyCatalog));
+            await salvarCatalogoIndexedDB().catch(() => {});
+        }
+    } catch (erro) {
+        if (!silencioso) console.warn('Falha ao sincronizar cadastros:', erro);
+    } finally {
+        familyCatalogSyncing = false;
+    }
+}
+
+async function iniciarNuvemCatalogo() {
+    if (!navigator.onLine) return;
+    try {
+        await garantirSupabaseCatalogo();
+        familyCatalogClient = window.supabase.createClient(FAMILY_CATALOG_SUPABASE_URL, FAMILY_CATALOG_SUPABASE_KEY, {
+            auth: {
+                storageKey: FAMILY_CATALOG_AUTH_STORAGE_KEY,
+                storage: window.localStorage,
+                persistSession: true,
+                autoRefreshToken: true,
+                detectSessionInUrl: false
+            }
+        });
+
+        const { data } = await familyCatalogClient.auth.getSession();
+        familyCatalogUser = data?.session?.user || null;
+        if (familyCatalogUser) await sincronizarCatalogo(true);
+
+        familyCatalogClient.auth.onAuthStateChange((_event, session) => {
+            familyCatalogUser = session?.user || null;
+            if (familyCatalogUser) setTimeout(() => sincronizarCatalogo(true), 100);
+        });
+
+        clearInterval(familyCatalogPoll);
+        familyCatalogPoll = setInterval(() => sincronizarCatalogo(true), 7000);
+    } catch (erro) {
+        console.warn('Cadastros online indisponíveis; usando cópia local:', erro);
+    }
+}
+
+criarPainelCatalogo();
+criarModalCatalogo();
+popularSelects();
+recuperarCatalogoIndexedDB().then(() => atualizarInterfaceCatalogo());
+iniciarNuvemCatalogo();
+window.addEventListener('online', () => setTimeout(() => {
+    if (!familyCatalogClient) iniciarNuvemCatalogo();
+    else sincronizarCatalogo(false);
+}, 300));
