@@ -3,6 +3,7 @@
     const FAMILY_CLOUD_META_KEY = 'dadosFinanceirosFamiliaresCloudMeta';
     const FAMILY_SUPABASE_URL = 'https://pqcltcegwmyuzytivakt.supabase.co';
     const FAMILY_SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_3B61vWHjC_Qu3ksO0GJVXA_d_ytJyop';
+    const FAMILY_AUTH_STORAGE_KEY = 'family-finance-auth-pqcltcegwmyuzytivakt';
 
     let client = null;
     let currentUser = null;
@@ -19,14 +20,27 @@
         if (!window.supabase?.createClient) throw new Error('Biblioteca Supabase indisponível');
 
         client = window.supabase.createClient(FAMILY_SUPABASE_URL, FAMILY_SUPABASE_PUBLISHABLE_KEY, {
-            auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true }
+            auth: {
+                storageKey: FAMILY_AUTH_STORAGE_KEY,
+                storage: window.localStorage,
+                persistSession: true,
+                autoRefreshToken: true,
+                detectSessionInUrl: false
+            }
         });
 
         ligarEventosNuvem();
         const { data, error } = await client.auth.getSession();
         if (error) throw error;
-        if (data?.session?.user) await ativarUsuarioNuvem(data.session.user);
-        else mostrarCloudDeslogado();
+
+        if (data?.session?.user) {
+            const { data: userData, error: userError } = await client.auth.getUser();
+            if (userError) throw userError;
+            if (userData?.user) await ativarUsuarioNuvem(userData.user);
+            else mostrarCloudDeslogado();
+        } else {
+            mostrarCloudDeslogado();
+        }
 
         client.auth.onAuthStateChange((event, session) => {
             setTimeout(() => {
@@ -166,7 +180,7 @@
     async function logoutCloud() {
         if (!client) return;
         await pushCloud(true).catch(() => {});
-        await client.auth.signOut();
+        await client.auth.signOut({ scope: 'local' });
         desativarUsuarioNuvem();
     }
 
@@ -200,7 +214,7 @@
 
     function payloadLocal() {
         return {
-            version: '2.1.0',
+            version: '2.2.0',
             gastos: listaGastos.map(normalizarGasto)
         };
     }
