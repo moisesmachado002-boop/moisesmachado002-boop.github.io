@@ -1,0 +1,133 @@
+/* v2.9.0 - navegador compacto de competências na aba Faturas.
+   Mantém o select original funcionando por trás para preservar toda a lógica existente. */
+(() => {
+    const NAV_ID = 'familyInvoiceMonthNavigator';
+
+    function familyMonthSelect() {
+        return document.getElementById('invoicePaymentCompetencia');
+    }
+
+    function familyMonthCompetencias() {
+        const select = familyMonthSelect();
+        if (!select) return [];
+        return [...select.options]
+            .map(op => op.value)
+            .filter(comp => typeof competenciaValida === 'function' && competenciaValida(comp))
+            .sort();
+    }
+
+    function familyMonthCriarNavegador() {
+        const select = familyMonthSelect();
+        if (!select) return null;
+
+        let nav = document.getElementById(NAV_ID);
+        if (nav) return nav;
+
+        select.classList.add('family-month-native-select');
+        select.setAttribute('aria-hidden', 'true');
+        select.tabIndex = -1;
+
+        nav = document.createElement('div');
+        nav.id = NAV_ID;
+        nav.className = 'family-month-navigator';
+        nav.setAttribute('aria-label', 'Navegação pelas faturas mensais');
+        nav.innerHTML = `
+            <button type="button" class="family-month-more family-month-newer" aria-label="Ver mês posterior">▲ <span>Mais futuros</span></button>
+            <button type="button" class="family-month-option family-month-next" aria-label="Mês posterior"></button>
+            <button type="button" class="family-month-option family-month-current" aria-current="true"></button>
+            <button type="button" class="family-month-option family-month-prev" aria-label="Mês anterior"></button>
+            <button type="button" class="family-month-more family-month-older" aria-label="Ver mês anterior"><span>Mais antigos</span> ▼</button>
+        `;
+        select.insertAdjacentElement('afterend', nav);
+
+        nav.querySelector('.family-month-newer')?.addEventListener('click', () => familyMonthMover(1));
+        nav.querySelector('.family-month-older')?.addEventListener('click', () => familyMonthMover(-1));
+        nav.querySelectorAll('.family-month-option').forEach(button => {
+            button.addEventListener('click', () => {
+                const competencia = button.dataset.competencia || '';
+                if (competencia) familyMonthSelecionar(competencia);
+            });
+        });
+
+        return nav;
+    }
+
+    function familyMonthSelecionar(competencia) {
+        const select = familyMonthSelect();
+        if (!select || !competencia) return;
+        if (![...select.options].some(op => op.value === competencia)) return;
+
+        if (select.value !== competencia) {
+            select.value = competencia;
+            select.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+        familyMonthAtualizarNavegador();
+    }
+
+    function familyMonthMover(delta) {
+        const select = familyMonthSelect();
+        const competencias = familyMonthCompetencias();
+        if (!select || !competencias.length) return;
+
+        let index = competencias.indexOf(select.value);
+        if (index < 0) index = 0;
+        const destino = Math.max(0, Math.min(competencias.length - 1, index + delta));
+        if (destino !== index) familyMonthSelecionar(competencias[destino]);
+    }
+
+    function familyMonthConfigurarBotao(button, competencia, fallback) {
+        if (!button) return;
+        const disponivel = Boolean(competencia);
+        button.disabled = !disponivel;
+        button.dataset.competencia = competencia || '';
+        button.textContent = disponivel
+            ? (typeof formatarCompetencia === 'function' ? formatarCompetencia(competencia) : competencia)
+            : fallback;
+    }
+
+    function familyMonthAtualizarNavegador() {
+        const select = familyMonthSelect();
+        const nav = familyMonthCriarNavegador();
+        if (!select || !nav) return;
+
+        const competencias = familyMonthCompetencias();
+        if (!competencias.length) return;
+
+        let atual = select.value;
+        if (!competencias.includes(atual)) {
+            atual = competencias.includes(competenciaAtualLocal?.())
+                ? competenciaAtualLocal()
+                : competencias[competencias.length - 1];
+            select.value = atual;
+        }
+
+        const index = competencias.indexOf(atual);
+        const anterior = index > 0 ? competencias[index - 1] : '';
+        const posterior = index >= 0 && index < competencias.length - 1 ? competencias[index + 1] : '';
+
+        familyMonthConfigurarBotao(nav.querySelector('.family-month-next'), posterior, 'Sem mês posterior');
+        familyMonthConfigurarBotao(nav.querySelector('.family-month-current'), atual, 'Mês atual');
+        familyMonthConfigurarBotao(nav.querySelector('.family-month-prev'), anterior, 'Sem mês anterior');
+
+        const newer = nav.querySelector('.family-month-newer');
+        const older = nav.querySelector('.family-month-older');
+        if (newer) newer.disabled = !posterior;
+        if (older) older.disabled = !anterior;
+    }
+
+    if (typeof familyInvoicePopulatePanelCompetencias === 'function') {
+        const familyMonthPopulateOriginal = familyInvoicePopulatePanelCompetencias;
+        familyInvoicePopulatePanelCompetencias = function(...args) {
+            const result = familyMonthPopulateOriginal.apply(this, args);
+            queueMicrotask(familyMonthAtualizarNavegador);
+            return result;
+        };
+    }
+
+    const selectInicial = familyMonthSelect();
+    selectInicial?.addEventListener('change', () => queueMicrotask(familyMonthAtualizarNavegador));
+
+    familyMonthAtualizarNavegador();
+    setTimeout(familyMonthAtualizarNavegador, 250);
+    setTimeout(familyMonthAtualizarNavegador, 1000);
+})();
