@@ -1,0 +1,80 @@
+/* v2.8.7 - Próximas faturas respeitam filtros por pessoa e cartão.
+   Alteração isolada: não muda geração de parcelas, valores armazenados ou pagamentos. */
+(() => {
+    function familyUpcomingActiveFilters() {
+        const pessoaPainel = document.getElementById('invoicePaymentPessoa')?.value || '';
+        const pessoaHistorico = document.getElementById('filtroPessoaHistorico')?.value || '';
+        const cartaoHistorico = document.getElementById('filtroCartaoHistorico')?.value || '';
+
+        return {
+            pessoa: pessoaPainel || pessoaHistorico,
+            cartao: cartaoHistorico
+        };
+    }
+
+    renderProximasFaturas = function() {
+        const container = document.getElementById('proximasFaturas');
+        if (!container) return;
+
+        const atual = competenciaAtualLocal();
+        const { pessoa, cartao } = familyUpcomingActiveFilters();
+        const grupos = {};
+
+        listaGastos.forEach(g => {
+            if (!competenciaValida(g.competenciaFatura) || g.competenciaFatura <= atual) return;
+            if (pessoa && g.p !== pessoa) return;
+            if (cartao && g.c !== cartao) return;
+
+            if (!grupos[g.competenciaFatura]) {
+                grupos[g.competenciaFatura] = { total: 0, qtd: 0, parcelas: 0 };
+            }
+
+            grupos[g.competenciaFatura].total += Number(g.valor) || 0;
+            grupos[g.competenciaFatura].qtd += 1;
+            if (gastoParcelado(g)) grupos[g.competenciaFatura].parcelas += 1;
+        });
+
+        const competencias = Object.keys(grupos).sort().slice(0, 8);
+        if (!competencias.length) {
+            const temFiltro = Boolean(pessoa || cartao);
+            container.innerHTML = `<div class="empty-upcoming">${
+                temFiltro
+                    ? 'Nenhum valor futuro programado para os filtros selecionados.'
+                    : 'Nenhum valor futuro programado.'
+            }</div>`;
+            return;
+        }
+
+        container.innerHTML = competencias.map(comp => {
+            const info = grupos[comp];
+            const detalhe = info.parcelas
+                ? `${info.qtd} lançamento(s) · ${info.parcelas} parcela(s)`
+                : `${info.qtd} lançamento(s)`;
+
+            return `<div class="fatura-futura-card">
+                <div class="fatura-futura-mes">${escapeHTML(formatarCompetencia(comp))}</div>
+                <div class="fatura-futura-valor">${formatarMoeda(info.total)}</div>
+                <div class="fatura-futura-detalhe">${escapeHTML(detalhe)}</div>
+            </div>`;
+        }).join('');
+
+        if (typeof window.__aplicarIdentidadeCartoes === 'function') {
+            requestAnimationFrame(() => window.__aplicarIdentidadeCartoes());
+        }
+    };
+
+    // O seletor de pessoa da aba Faturas atualiza somente o painel principal.
+    // Este wrapper mantém o resumo futuro sincronizado com a mesma seleção.
+    if (typeof familyInvoiceRenderPanel === 'function') {
+        const familyUpcomingInvoiceRenderOriginal = familyInvoiceRenderPanel;
+        familyInvoiceRenderPanel = function(...args) {
+            const result = familyUpcomingInvoiceRenderOriginal.apply(this, args);
+            renderProximasFaturas();
+            return result;
+        };
+    }
+
+    // Os filtros do histórico já chamam carregarTabela(), que por sua vez chama
+    // renderProximasFaturas(). Esta chamada inicial garante o estado correto ao abrir.
+    renderProximasFaturas();
+})();
