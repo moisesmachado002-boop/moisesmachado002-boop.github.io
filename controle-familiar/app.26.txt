@@ -1,0 +1,130 @@
+/* v2.12.0 - núcleo compartilhado de infraestrutura.
+   Organiza extensões futuras e reaproveita uma única instância Supabase
+   quando URL, chave e storage de autenticação forem os mesmos. */
+(() => {
+    if (window.familyCore?.version === '2.12.0') return;
+
+    const moduleRegistry = new Map();
+    const eventListeners = new Map();
+    const supabaseClients = new Map();
+
+    function registerModule(name, info = {}) {
+        const key = String(name || '').trim();
+        if (!key) return null;
+        const entry = {
+            name: key,
+            version: String(info.version || window.__CONTROLE_FAMILIAR_VERSION || ''),
+            area: String(info.area || ''),
+            loadedAt: new Date().toISOString()
+        };
+        moduleRegistry.set(key, entry);
+        return entry;
+    }
+
+    function modules() {
+        return [...moduleRegistry.values()].map(item => ({ ...item }));
+    }
+
+    function on(eventName, handler) {
+        const name = String(eventName || '').trim();
+        if (!name || typeof handler !== 'function') return () => {};
+        if (!eventListeners.has(name)) eventListeners.set(name, new Set());
+        eventListeners.get(name).add(handler);
+        return () => eventListeners.get(name)?.delete(handler);
+    }
+
+    function emit(eventName, detail) {
+        const handlers = [...(eventListeners.get(String(eventName || '')) || [])];
+        handlers.forEach(handler => {
+            try { handler(detail); }
+            catch (error) { console.warn(`Falha no evento interno ${eventName}:`, error); }
+        });
+    }
+
+    function authStorageKey(options) {
+        return String(options?.auth?.storageKey || '');
+    }
+
+    function clientCacheKey(url, key, options) {
+        return JSON.stringify([
+            String(url || ''),
+            String(key || ''),
+            authStorageKey(options)
+        ]);
+    }
+
+    function patchSupabaseLibrary(library) {
+        if (!library?.createClient || library.createClient.__familySharedClientFactory) return library;
+
+        const originalCreateClient = library.createClient.bind(library);
+        const sharedCreateClient = function(url, key, options = {}) {
+            const cacheKey = clientCacheKey(url, key, options);
+            if (supabaseClients.has(cacheKey)) return supabaseClients.get(cacheKey);
+            const client = originalCreateClient(url, key, options);
+            supabaseClients.set(cacheKey, client);
+            return client;
+        };
+
+        Object.defineProperty(sharedCreateClient, '__familySharedClientFactory', {
+            value: true,
+            enumerable: false
+        });
+        Object.defineProperty(sharedCreateClient, '__familyOriginalCreateClient', {
+            value: originalCreateClient,
+            enumerable: false
+        });
+
+        library.createClient = sharedCreateClient;
+        return library;
+    }
+
+    function installSupabaseHook() {
+        if (window.supabase?.createClient) {
+            patchSupabaseLibrary(window.supabase);
+            return;
+        }
+
+        const descriptor = Object.getOwnPropertyDescriptor(window, 'supabase');
+        if (descriptor && descriptor.configurable === false) return;
+
+        let currentValue = descriptor?.value;
+        try {
+            Object.defineProperty(window, 'supabase', {
+                configurable: true,
+                enumerable: descriptor?.enumerable ?? true,
+                get() { return currentValue; },
+                set(value) {
+                    currentValue = patchSupabaseLibrary(value);
+                }
+            });
+            if (currentValue) currentValue = patchSupabaseLibrary(currentValue);
+        } catch (error) {
+            console.warn('Núcleo compartilhado: não foi possível instalar o reaproveitamento do Supabase.', error);
+        }
+    }
+
+    function sharedClientCount() {
+        return supabaseClients.size;
+    }
+
+    window.familyCore = {
+        version: '2.12.0',
+        registerModule,
+        modules,
+        on,
+        emit,
+        patchSupabaseLibrary,
+        sharedClientCount,
+        architecture: {
+            data: 'lançamentos e parcelamentos',
+            invoices: 'faturas e pagamentos',
+            catalog: 'pessoas e cartões',
+            cards: 'limites e datas',
+            cloud: 'sincronização e persistência',
+            ui: 'filtros e apresentação'
+        }
+    };
+
+    installSupabaseHook();
+    registerModule('core', { area: 'infraestrutura', version: '2.12.0' });
+})();
