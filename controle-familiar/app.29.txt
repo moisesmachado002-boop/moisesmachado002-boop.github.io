@@ -1,0 +1,124 @@
+/* v2.12.1 - entrada monetária automática no campo Valor.
+   Digitação da direita para a esquerda: 2 -> 0,02 -> 0,20 -> 2,00.
+   Camada apenas de interface; antes de salvar converte para o formato numérico esperado pelo núcleo. */
+(() => {
+    const core = window.familyCore;
+    const campo = document.getElementById('valor');
+    if (!campo || !core?.on) return;
+
+    function somenteDigitos(valor) {
+        return String(valor ?? '').replace(/\D/g, '');
+    }
+
+    function formatarDigitos(digitos) {
+        const bruto = somenteDigitos(digitos);
+        if (!bruto) return '';
+
+        const normalizado = bruto.replace(/^0+(?=\d)/, '') || '0';
+        const preenchido = normalizado.padStart(3, '0');
+        const centavos = preenchido.slice(-2);
+        const inteirosBrutos = preenchido.slice(0, -2) || '0';
+        const inteiros = inteirosBrutos.replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+        return `${inteiros},${centavos}`;
+    }
+
+    function numeroParaDigitos(valor) {
+        const texto = String(valor ?? '').trim();
+        if (!texto) return '';
+
+        let normalizado = texto;
+        if (texto.includes(',')) {
+            normalizado = texto.replace(/\./g, '').replace(',', '.');
+        }
+
+        const numero = Number(normalizado);
+        if (!Number.isFinite(numero) || numero < 0) return '';
+        return String(Math.round(numero * 100));
+    }
+
+    function formatarValorNumerico(valor) {
+        const digitos = numeroParaDigitos(valor);
+        return digitos ? formatarDigitos(digitos) : '';
+    }
+
+    function valorParaNumero(valorExibido) {
+        const digitos = somenteDigitos(valorExibido);
+        if (!digitos) return '';
+
+        const normalizado = digitos.replace(/^0+(?=\d)/, '') || '0';
+        const preenchido = normalizado.padStart(3, '0');
+        const centavos = preenchido.slice(-2);
+        const inteiros = (preenchido.slice(0, -2) || '0').replace(/^0+(?=\d)/, '') || '0';
+        return `${inteiros}.${centavos}`;
+    }
+
+    function posicionarFim() {
+        try {
+            const fim = campo.value.length;
+            campo.setSelectionRange(fim, fim);
+        } catch {}
+    }
+
+    function configurarCampo() {
+        // type=text é necessário para exibir vírgula no padrão brasileiro.
+        campo.type = 'text';
+        campo.inputMode = 'numeric';
+        campo.autocomplete = 'off';
+        campo.setAttribute('aria-label', 'Valor em reais');
+        campo.placeholder = '0,00';
+    }
+
+    configurarCampo();
+
+    campo.addEventListener('input', () => {
+        campo.value = formatarDigitos(campo.value);
+        posicionarFim();
+    });
+
+    campo.addEventListener('focus', () => {
+        const editando = Boolean(document.getElementById('editId')?.value);
+        if (!editando || !campo.value) return;
+        setTimeout(() => {
+            try { campo.select(); } catch {}
+        }, 0);
+    });
+
+    core.on('expense:edit-prepared', () => {
+        configurarCampo();
+        campo.value = formatarValorNumerico(campo.value);
+    });
+
+    core.on('expense:before-save', () => {
+        campo.value = valorParaNumero(campo.value);
+    });
+
+    core.on('expense:save-finished', () => {
+        // Em caso de validação bloqueada, devolve imediatamente a apresentação com vírgula.
+        if (campo.value) campo.value = formatarValorNumerico(campo.value);
+    });
+
+    core.on('expense:form-cleared', () => {
+        configurarCampo();
+        campo.value = '';
+    });
+
+    window.__familyCurrencyInput = {
+        formatDigits: formatarDigitos,
+        formatNumber: formatarValorNumerico,
+        toNumberString: valorParaNumero
+    };
+
+    const testeRapido = [
+        ['2', '0,02'],
+        ['20', '0,20'],
+        ['200', '2,00'],
+        ['2000', '20,00'],
+        ['123456', '1.234,56']
+    ].every(([entrada, esperado]) => formatarDigitos(entrada) === esperado);
+
+    if (!testeRapido) {
+        console.warn('Entrada monetária: autoteste de formatação não passou.');
+    }
+
+    core.registerModule?.('currency-input', { area: 'interface', version: '2.12.1' });
+})();
