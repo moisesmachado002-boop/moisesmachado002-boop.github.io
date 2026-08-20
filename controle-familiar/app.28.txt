@@ -1,15 +1,23 @@
-/* v2.12.0 - ponte estável para extensões futuras.
-   Mantém as funções atuais intactas e publica eventos após suas execuções,
+/* v2.12.1 - ponte estável para extensões futuras.
+   Mantém as funções atuais intactas e publica eventos antes/depois de pontos seguros,
    evitando que novos módulos precisem criar mais cadeias de sobrescrita. */
 (() => {
     const core = window.familyCore;
     if (!core?.emit) return;
 
-    function bridge(functionName, eventName) {
+    function bridge(functionName, eventName, beforeEventName = '') {
         const original = globalThis[functionName];
         if (typeof original !== 'function' || original.__familyCoreBridge) return;
 
         const wrapped = function(...args) {
+            if (beforeEventName) {
+                core.emit(beforeEventName, {
+                    functionName,
+                    args,
+                    at: new Date().toISOString()
+                });
+            }
+
             const result = original.apply(this, args);
             const publish = () => core.emit(eventName, {
                 functionName,
@@ -44,5 +52,10 @@
     bridge('familyInvoiceSync', 'invoices:synced');
     bridge('familyCardSync', 'cards:synced');
 
-    core.registerModule?.('event-bridge', { area: 'infraestrutura', version: '2.12.0' });
+    // Eventos de formulário para pequenas extensões de UX sem tocar nas regras financeiras.
+    bridge('salvarGasto', 'expense:save-finished', 'expense:before-save');
+    bridge('prepararEdicao', 'expense:edit-prepared');
+    bridge('limparFormulario', 'expense:form-cleared');
+
+    core.registerModule?.('event-bridge', { area: 'infraestrutura', version: '2.12.1' });
 })();
