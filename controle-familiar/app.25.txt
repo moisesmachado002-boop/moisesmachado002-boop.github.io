@@ -1,0 +1,412 @@
+/* v2.10.0 - Etapa 1 de integridade e segurança dos dados.
+   - valida valores com no máximo 2 casas decimais
+   - impede renumeração de parcelas que criaria lacunas
+   - audita parcelamentos e IDs automaticamente
+   - acompanha a virada real do mês no formulário
+   - usa centavos nas próximas faturas e no PDF
+   - evita que histórico antigo sem status consuma limite do cartão */
+(() => {
+    const FAMILY_STAGE1_CALENDAR_KEY = `${STORAGE_KEY}:mesCalendarioVisto`;
+    let familyIntegrityTimer = null;
+
+    function familyStage1ToCents(valor) {
+        const numero = Number(valor);
+        return Number.isFinite(numero) ? Math.round(numero * 100) : 0;
+    }
+
+    function familyStage1FromCents(centavos) {
+        return (Number(centavos) || 0) / 100;
+    }
+
+    function familyStage1CurrentCompetence() {
+        if (typeof competenciaAtualLocal === 'function') return competenciaAtualLocal();
+        const agora = new Date();
+        return `${agora.getFullYear()}-${String(agora.getMonth() + 1).padStart(2, '0')}`;
+    }
+
+    /* A competência padrão acompanha a virada real do mês, mas respeita escolhas manuais
+       enquanto o usuário continua no mesmo mês de calendário. */
+    obterCompetenciaFaturaPadrao = function() {
+        const atual = familyStage1CurrentCompetence();
+        let salva = '';
+        let calendarioVisto = '';
+
+        try {
+            salva = localStorage.getItem(FATURA_PADRAO_KEY) || '';
+            calendarioVisto = localStorage.getItem(FAMILY_STAGE1_CALENDAR_KEY) || '';
+        } catch {}
+
+        if (!competenciaValida(calendarioVisto)) {
+            try { localStorage.setItem(FAMILY_STAGE1_CALENDAR_KEY, atual); } catch {}
+            if (competenciaValida(salva) && salva < atual) {
+                try { localStorage.setItem(FATURA_PADRAO_KEY, atual); } catch {}
+                return atual;
+            }
+            return competenciaValida(salva) ? salva : atual;
+        }
+
+        if (calendarioVisto !== atual) {
+            try {
+                localStorage.setItem(FAMILY_STAGE1_CALENDAR_KEY, atual);
+                localStorage.setItem(FATURA_PADRAO_KEY, atual);
+            } catch {}
+            return atual;
+        }
+
+        return competenciaValida(salva) ? salva : atual;
+    };
+
+    function familyStage1ValorValido(raw) {
+        const numero = Number(raw);
+        if (!Number.isFinite(numero) || numero <= 0) return false;
+        return Math.abs(numero * 100 - Math.round(numero * 100)) < 1e-7;
+    }
+
+    const familyStage1SalvarGastoOriginal = salvarGasto;
+    salvarGasto = function(...args) {
+        const campoValor = document.getElementById('valor');
+        const valorRaw = campoValor?.value || '';
+        if (!familyStage1ValorValido(valorRaw)) {
+            alert('Informe um valor maior que zero e com no máximo 2 casas decimais.');
+            campoValor?.focus();
+            return;
+        }
+
+        const editId = document.getElementById('editId')?.value || '';
+        const gastoAtual = editId ? listaGastos.find(g => g.id === editId) : null;
+        const parcela = typeof dadosParcelamentoFormulario === 'function'
+            ? dadosParcelamentoFormulario()
+            : { parcelado: false, atual: null, total: null };
+
+        if (gastoAtual && gastoParcelado(gastoAtual) && parcela.parcelado) {
+            const antiga = Number(gastoAtual.parcelaAtual);
+            const nova = Number(parcela.atual);
+            if (Number.isInteger(nova) && nova > antiga) {
+                alert(
+                    `Essa alteração criaria uma lacuna no parcelamento (${antiga}/${gastoAtual.totalParcelas} para ${nova}/${parcela.total}).\n\n` +
+                    'Para proteger a sequência, a alteração foi bloqueada. Ajuste a partir de uma parcela anterior ou use a verificação de integridade.'
+                );
+                return;
+            }
+        }
+
+        if (campoValor) {
+            campoValor.value = (familyStage1ToCents(valorRaw) / 100).toFixed(2);
+        }
+        return familyStage1SalvarGastoOriginal.apply(this, args);
+    };
+
+    function familyStage1AuditIntegrity() {
+        const erros = [];
+        const avisos = [];
+        const ids = new Set();
+        const grupos = new Map();
+
+        listaGastos.forEach((g, index) => {
+            const pos = index + 1;
+            const id = String(g?.id || '');
+            if (!id) erros.push(`Registro ${pos}: ID ausente.`);
+            else if (ids.has(id)) erros.push(`Registro ${pos}: ID duplicado (${id}).`);
+            else ids.add(id);
+
+            const valor = Number(g?.valor);
+            if (!Number.isFinite(valor) || valor <= 0) erros.push(`Registro ${pos}: valor inválido.`);
+            else if (Math.abs(valor * 100 - Math.round(valor * 100)) >= 1e-7) {
+                erros.push(`Registro ${pos}: valor com mais de 2 casas decimais.`);
+            }
+
+            if (competenciaValida(g?.competenciaFatura)) {
+                const mes = String(g.competenciaFatura).slice(5, 7);
+                if (String(g?.mesFatura || '') !== mes) {
+                    erros.push(`Registro ${pos}: mês da fatura diverge da competência ${g.competenciaFatura}.`);
+                }
+            }
+
+            if (gastoParcelado(g)) {
+                const chave = String(g.parcelamentoId);
+                if (!grupos.has(chave)) grupos.set(chave, []);
+                grupos.get(chave).push(g);
+            }
+        });
+
+        grupos.forEach((itens, grupo) => {
+            const numeros = itens.map(g => Number(g.parcelaAtual)).sort((a, b) => a - b);
+            const totais = [...new Set(itens.map(g => Number(g.totalParcelas)))];
+            const pessoas = [...new Set(itens.map(g => String(g.p || '')))].filter(Boolean);
+            const cartoes = [...new Set(itens.map(g => String(g.c || '')))].filter(Boolean);
+
+            if (totais.length !== 1) erros.push(`Parcelamento ${grupo}: total de parcelas inconsistente.`);
+            if (pessoas.length > 1) erros.push(`Parcelamento ${grupo}: responsáveis diferentes dentro do mesmo grupo.`);
+            if (cartoes.length > 1) erros.push(`Parcelamento ${grupo}: cartões diferentes dentro do mesmo grupo.`);
+
+            const vistos = new Set();
+            numeros.forEach(numero => {
+                if (vistos.has(numero)) erros.push(`Parcelamento ${grupo}: parcela ${numero} duplicada.`);
+                vistos.add(numero);
+            });
+
+            const total = totais.length === 1 ? totais[0] : Math.max(...numeros, 0);
+            if (Number.isInteger(total) && total > 0) {
+                const faltantes = [];
+                for (let n = 1; n <= total; n++) {
+                    if (!vistos.has(n)) faltantes.push(n);
+                }
+                if (faltantes.length) {
+                    avisos.push(`Parcelamento ${grupo}: faltam ${faltantes.map(n => `${n}/${total}`).join(', ')}.`);
+                }
+            }
+
+            const ordenados = [...itens].sort((a, b) => Number(a.parcelaAtual) - Number(b.parcelaAtual));
+            for (let i = 1; i < ordenados.length; i++) {
+                const anterior = ordenados[i - 1];
+                const atual = ordenados[i];
+                if (!competenciaValida(anterior.competenciaFatura) || !competenciaValida(atual.competenciaFatura)) continue;
+                const salto = Number(atual.parcelaAtual) - Number(anterior.parcelaAtual);
+                if (salto <= 0) continue;
+                const esperado = adicionarMesesCompetencia(anterior.competenciaFatura, salto);
+                if (esperado !== atual.competenciaFatura) {
+                    erros.push(
+                        `Parcelamento ${grupo}: ${atual.parcelaAtual}/${atual.totalParcelas} está em ${atual.competenciaFatura}, esperado ${esperado}.`
+                    );
+                }
+            }
+        });
+
+        return {
+            ok: erros.length === 0 && avisos.length === 0,
+            erros,
+            avisos,
+            totalLancamentos: listaGastos.length,
+            totalParcelamentos: grupos.size
+        };
+    }
+
+    function familyStage1EnsureIntegrityPanel() {
+        const tab = document.getElementById('familyTabCadastros');
+        if (!tab || document.getElementById('familyIntegrityPanel')) return;
+
+        const panel = document.createElement('div');
+        panel.id = 'familyIntegrityPanel';
+        panel.className = 'family-integrity-panel';
+        panel.innerHTML = `
+            <div class="family-integrity-copy">
+                <strong>Integridade dos dados</strong>
+                <span id="familyIntegrityText">Verificando lançamentos e parcelamentos...</span>
+            </div>
+            <button type="button" id="familyIntegrityCheck" class="btn-secondary">Verificar agora</button>
+        `;
+
+        const helper = tab.querySelector('.family-tab-helper');
+        if (helper) helper.insertAdjacentElement('afterend', panel);
+        else tab.insertAdjacentElement('afterbegin', panel);
+
+        document.getElementById('familyIntegrityCheck')?.addEventListener('click', () => familyStage1RunAudit(true));
+    }
+
+    function familyStage1RunAudit(mostrarDetalhes = false) {
+        familyStage1EnsureIntegrityPanel();
+        const relatorio = familyStage1AuditIntegrity();
+        window.__familyIntegrityLastReport = relatorio;
+
+        const panel = document.getElementById('familyIntegrityPanel');
+        const texto = document.getElementById('familyIntegrityText');
+        if (panel) {
+            panel.classList.toggle('integrity-ok', relatorio.ok);
+            panel.classList.toggle('integrity-warning', !relatorio.ok);
+        }
+        if (texto) {
+            texto.textContent = relatorio.ok
+                ? `${relatorio.totalLancamentos} lançamentos e ${relatorio.totalParcelamentos} parcelamentos verificados. Tudo certo.`
+                : `${relatorio.erros.length} erro(s) e ${relatorio.avisos.length} aviso(s) encontrados.`;
+        }
+
+        if (relatorio.erros.length || relatorio.avisos.length) {
+            console.warn('Auditoria de integridade do Controle Familiar', relatorio);
+        }
+
+        if (mostrarDetalhes) {
+            const linhas = [
+                `Lançamentos: ${relatorio.totalLancamentos}`,
+                `Parcelamentos: ${relatorio.totalParcelamentos}`,
+                `Erros: ${relatorio.erros.length}`,
+                `Avisos: ${relatorio.avisos.length}`
+            ];
+            const detalhes = [...relatorio.erros, ...relatorio.avisos].slice(0, 10);
+            if (detalhes.length) linhas.push('', ...detalhes);
+            if (relatorio.erros.length + relatorio.avisos.length > 10) linhas.push('', 'Há mais ocorrências registradas no diagnóstico interno.');
+            alert(linhas.join('\n'));
+        }
+
+        return relatorio;
+    }
+
+    function familyStage1ScheduleAudit() {
+        clearTimeout(familyIntegrityTimer);
+        familyIntegrityTimer = setTimeout(() => familyStage1RunAudit(false), 120);
+    }
+
+    const familyStage1SalvarLocalOriginal = salvarLocal;
+    salvarLocal = function(...args) {
+        const result = familyStage1SalvarLocalOriginal.apply(this, args);
+        familyStage1ScheduleAudit();
+        return result;
+    };
+
+    /* Histórico sem status explícito não deve consumir o limite atual.
+       Histórico marcado como Em aberto/Parcial continua contando normalmente. */
+    if (typeof familyCardOutstandingCents === 'function') {
+        familyCardOutstandingCents = function(card) {
+            const atual = familyStage1CurrentCompetence();
+            const totais = new Map();
+
+            listaGastos.forEach(gasto => {
+                if (gasto?.c !== card || !competenciaValida(gasto?.competenciaFatura)) return;
+                totais.set(
+                    gasto.competenciaFatura,
+                    (totais.get(gasto.competenciaFatura) || 0) + familyStage1ToCents(gasto.valor)
+                );
+            });
+
+            let outstanding = 0;
+            totais.forEach((total, competencia) => {
+                const chave = typeof familyInvoiceKey === 'function' ? familyInvoiceKey(competencia, card) : '';
+                const possuiEstado = Boolean(
+                    chave &&
+                    typeof familyInvoicePayments !== 'undefined' &&
+                    Object.prototype.hasOwnProperty.call(familyInvoicePayments, chave)
+                );
+
+                if (competencia < atual && !possuiEstado) return;
+
+                const pago = typeof familyInvoicePaidCents === 'function'
+                    ? familyInvoicePaidCents(competencia, card)
+                    : 0;
+                outstanding += Math.max(total - pago, 0);
+            });
+
+            return outstanding;
+        };
+    }
+
+    /* Próximas faturas calculadas integralmente em centavos. */
+    renderProximasFaturas = function() {
+        const container = document.getElementById('proximasFaturas');
+        if (!container) return;
+
+        const atual = familyStage1CurrentCompetence();
+        const pessoa = document.getElementById('invoicePaymentPessoa')?.value ||
+            document.getElementById('filtroPessoaHistorico')?.value || '';
+        const cartao = document.getElementById('invoicePaymentCartao')?.value ||
+            document.getElementById('filtroCartaoHistorico')?.value || '';
+        const grupos = {};
+
+        listaGastos.forEach(g => {
+            if (!competenciaValida(g.competenciaFatura) || g.competenciaFatura <= atual) return;
+            if (pessoa && g.p !== pessoa) return;
+            if (cartao && g.c !== cartao) return;
+
+            if (!grupos[g.competenciaFatura]) {
+                grupos[g.competenciaFatura] = { cents: 0, qtd: 0, parcelas: 0 };
+            }
+            grupos[g.competenciaFatura].cents += familyStage1ToCents(g.valor);
+            grupos[g.competenciaFatura].qtd += 1;
+            if (gastoParcelado(g)) grupos[g.competenciaFatura].parcelas += 1;
+        });
+
+        const competencias = Object.keys(grupos).sort().slice(0, 8);
+        if (!competencias.length) {
+            container.innerHTML = `<div class="empty-upcoming">${pessoa || cartao
+                ? 'Nenhum valor futuro programado para os filtros selecionados.'
+                : 'Nenhum valor futuro programado.'}</div>`;
+            return;
+        }
+
+        container.innerHTML = competencias.map(comp => {
+            const info = grupos[comp];
+            const detalhe = info.parcelas
+                ? `${info.qtd} lançamento(s) · ${info.parcelas} parcela(s)`
+                : `${info.qtd} lançamento(s)`;
+            return `<div class="fatura-futura-card">
+                <div class="fatura-futura-mes">${escapeHTML(formatarCompetencia(comp))}</div>
+                <div class="fatura-futura-valor">${formatarMoeda(familyStage1FromCents(info.cents))}</div>
+                <div class="fatura-futura-detalhe">${escapeHTML(detalhe)}</div>
+            </div>`;
+        }).join('');
+
+        if (typeof window.__aplicarIdentidadeCartoes === 'function') {
+            requestAnimationFrame(() => window.__aplicarIdentidadeCartoes());
+        }
+    };
+
+    /* Relatório PDF também soma por centavos. */
+    gerarPDF = function() {
+        const gastosFiltrados = filtrarGastos();
+        if (gastosFiltrados.length === 0) {
+            alert('Não há dados filtrados para gerar o relatório.');
+            return;
+        }
+
+        const dataEmissaoStr = `Emitido em: ${new Date().toLocaleDateString('pt-BR')}`;
+        const gastosPorPessoa = {};
+        gastosFiltrados.forEach(g => {
+            if (!gastosPorPessoa[g.p]) gastosPorPessoa[g.p] = [];
+            gastosPorPessoa[g.p].push(g);
+        });
+
+        let htmlCompleto = '';
+        let primeiraPagina = true;
+        Object.keys(gastosPorPessoa).sort().forEach(dono => {
+            const listaDono = gastosPorPessoa[dono];
+            const totalCentavos = listaDono.reduce((acc, curr) => acc + familyStage1ToCents(curr.valor), 0);
+            const estiloQuebra = primeiraPagina ? '' : 'page-break-before: always; margin-top: 20px;';
+            primeiraPagina = false;
+
+            htmlCompleto += `<div style="${estiloQuebra}">
+                <div style="text-align:center;margin-bottom:20px;">
+                    <h1 style="font-size:16px;margin:0;color:#1f2937;text-transform:uppercase;">Relatório Individual - ${escapeHTML(dono)}</h1>
+                    <p style="font-size:11px;color:#4b5563;margin-top:4px;">${dataEmissaoStr}</p>
+                    <hr style="border:0;border-top:1px solid #cbd5e1;margin-top:10px;">
+                </div>
+                <table style="width:100%;border-collapse:collapse;font-size:11px;margin-bottom:15px;">
+                    <thead><tr style="background-color:#1f2937;color:white;-webkit-print-color-adjust:exact;">
+                        <th style="padding:8px;text-align:left;">Descrição</th>
+                        <th style="padding:8px;text-align:left;">Data</th>
+                        <th style="padding:8px;text-align:left;">Fatura</th>
+                        <th style="padding:8px;text-align:right;">Valor</th>
+                        <th style="padding:8px;text-align:left;">Cartão</th>
+                    </tr></thead><tbody>`;
+
+            listaDono.forEach(g => {
+                const desc = gastoParcelado(g) ? `${g.desc} ${g.parcelaAtual}/${g.totalParcelas}` : g.desc;
+                htmlCompleto += `<tr>
+                    <td style="padding:7px 8px;border-bottom:1px solid #cbd5e1;">${escapeHTML(desc)}</td>
+                    <td style="padding:7px 8px;border-bottom:1px solid #cbd5e1;">${formatarData(g.data)}</td>
+                    <td style="padding:7px 8px;border-bottom:1px solid #cbd5e1;">${escapeHTML(formatarCompetencia(g.competenciaFatura, g.mesFatura))}</td>
+                    <td style="padding:7px 8px;border-bottom:1px solid #cbd5e1;text-align:right;">${formatarMoeda(familyStage1FromCents(familyStage1ToCents(g.valor)))}</td>
+                    <td style="padding:7px 8px;border-bottom:1px solid #cbd5e1;">${escapeHTML(g.c)}</td>
+                </tr>`;
+            });
+
+            htmlCompleto += `</tbody></table>
+                <table style="width:100%;border-top:2px solid #2563eb;margin-top:15px;font-size:13px;font-weight:bold;color:#2563eb;">
+                    <tr><td style="padding-top:10px;">TOTAL DE ${escapeHTML(dono).toUpperCase()}:</td>
+                    <td style="text-align:right;padding-top:10px;">${formatarMoeda(familyStage1FromCents(totalCentavos))}</td></tr>
+                </table></div>`;
+        });
+
+        const containerPrint = document.getElementById('totaisContainerPrint');
+        if (!containerPrint) return;
+        containerPrint.innerHTML = htmlCompleto;
+        containerPrint.style.display = 'block';
+        window.print();
+    };
+
+    window.__familyIntegrityAudit = familyStage1AuditIntegrity;
+    window.__familyIntegrityRun = familyStage1RunAudit;
+
+    aplicarCompetenciaFaturaPadrao();
+    familyStage1EnsureIntegrityPanel();
+    familyStage1RunAudit(false);
+    if (typeof familyCardRefreshUI === 'function') familyCardRefreshUI();
+    if (typeof renderProximasFaturas === 'function') renderProximasFaturas();
+})();
