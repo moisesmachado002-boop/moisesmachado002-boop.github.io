@@ -1,0 +1,86 @@
+/* Etapa 13 — correção visual da aba Faturas
+   SOMENTE CSS. Não altera regras, cálculos, pagamentos, filtros ou dados. */
+
+.invoice-payment-grid{
+  grid-template-columns:repeat(auto-fit,minmax(310px,1fr));
+  gap:14px;
+  align-items:start;
+}
+
+.invoice-payment-card{
+  min-width:0;
+  height:auto;
+  align-self:start;
+}
+
+.invoice-payment-card-head{
+  align-items:flex-start;
+}
+
+.invoice-payment-card-head>strong{
+  line-height:1.2;
+}
+
+.invoice-payment-values,
+.card-credit-values{
+  min-width:0;
+}
+
+.invoice-payment-values>div,
+.card-credit-values>div{
+  min-width:0;
+}
+
+.invoice-payment-values strong,
+.card-credit-values strong{
+  white-space:nowrap;
+}
+
+.card-credit-box{
+  margin-bottom:12px;
+}
+
+.invoice-payment-actions{
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:7px;
+}
+
+.invoice-payment-actions button{
+  min-width:0;
+  min-height:38px;
+  padding:8px 7px;
+  font-size:11px;
+  line-height:1.15;
+  white-space:normal;
+  overflow-wrap:normal;
+  word-break:normal;
+}
+
+@media (min-width:1180px){
+  .invoice-payment-grid{
+    grid-template-columns:repeat(3,minmax(0,1fr));
+  }
+}
+
+@media (max-width:760px){
+  .invoice-payment-grid{
+    grid-template-columns:repeat(2,minmax(0,1fr));
+  }
+}
+
+@media (max-width:640px){
+  .invoice-payment-grid{
+    grid-template-columns:1fr;
+  }
+
+  .invoice-payment-actions{
+    grid-template-columns:repeat(2,minmax(0,1fr));
+  }
+}
+
+@media (max-width:380px){
+  .invoice-payment-values,
+  .card-credit-values{
+    grid-template-columns:1fr 1fr;
+  }
+}
