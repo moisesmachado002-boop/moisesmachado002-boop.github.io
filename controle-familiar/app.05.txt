@@ -456,7 +456,24 @@
         const localMs = Date.parse(meta.updatedAt || '') || 0;
 
         if (temRemote && temDadosLocais() && listasIguais(listaGastos, remoteGastos)) {
-            marcarSincronizado(remotoEm);
+            const remotoTemMarcadorExclusivo = Boolean(
+                remote.data?.data &&
+                !Array.isArray(remote.data.data) &&
+                remote.data.data.dataUpdatedAt &&
+                Number.isFinite(Date.parse(remote.data.data.dataUpdatedAt))
+            );
+            if (remotoTemMarcadorExclusivo) {
+                marcarSincronizado(remotoEm);
+            } else {
+                const agora = new Date().toISOString();
+                salvarCloudMeta({
+                    updatedAt: agora,
+                    lastSyncedDataUpdatedAt: remotoEm,
+                    pendingSync: true,
+                    userId: currentUser.id
+                });
+                await pushCloud(true);
+            }
         } else if (temRemote && temPendencias) {
             const mesclados = aplicarPendenciasCloud(remoteGastos, pendencias);
             aplicarListaLocal(mesclados);
