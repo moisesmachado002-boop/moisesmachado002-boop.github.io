@@ -1,14 +1,15 @@
-/* v2.8.7 - Próximas faturas respeitam filtros por pessoa e cartão.
+/* v2.8.8 - Próximas faturas respeitam filtros por pessoa e cartão.
    Alteração isolada: não muda geração de parcelas, valores armazenados ou pagamentos. */
 (() => {
     function familyUpcomingActiveFilters() {
         const pessoaPainel = document.getElementById('invoicePaymentPessoa')?.value || '';
         const pessoaHistorico = document.getElementById('filtroPessoaHistorico')?.value || '';
+        const cartaoPainel = document.getElementById('invoicePaymentCartao')?.value || '';
         const cartaoHistorico = document.getElementById('filtroCartaoHistorico')?.value || '';
 
         return {
             pessoa: pessoaPainel || pessoaHistorico,
-            cartao: cartaoHistorico
+            cartao: cartaoPainel || cartaoHistorico
         };
     }
 
@@ -63,8 +64,8 @@
         }
     };
 
-    // O seletor de pessoa da aba Faturas atualiza somente o painel principal.
-    // Este wrapper mantém o resumo futuro sincronizado com a mesma seleção.
+    // Os seletores da aba Faturas atualizam o painel principal.
+    // Este wrapper mantém o resumo futuro sincronizado com pessoa/cartão selecionados.
     if (typeof familyInvoiceRenderPanel === 'function') {
         const familyUpcomingInvoiceRenderOriginal = familyInvoiceRenderPanel;
         familyInvoiceRenderPanel = function(...args) {
