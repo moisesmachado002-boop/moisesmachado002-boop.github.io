@@ -1,0 +1,130 @@
+/* v2.8.8 - filtro de cartão dentro da aba Faturas.
+   Alteração isolada: filtra a visualização já calculada, sem alterar lançamentos,
+   parcelas, pagamentos ou valores armazenados. */
+(() => {
+    function familyInvoicePanelCardList() {
+        const ativos = typeof familyCatalog !== 'undefined' && Array.isArray(familyCatalog?.cartoes)
+            ? familyCatalog.cartoes
+            : [];
+        const historicos = listaGastos.map(g => g?.c).filter(Boolean);
+        return [...new Set([...ativos, ...historicos])];
+    }
+
+    function familyInvoicePopulatePanelCardFilter() {
+        const select = document.getElementById('invoicePaymentCartao');
+        if (!select) return;
+
+        const atual = select.value;
+        const cartoes = familyInvoicePanelCardList();
+        select.innerHTML = '<option value="">Todos os cartões</option>' +
+            cartoes.map(cartao => `<option value="${escapeHTML(cartao)}">${escapeHTML(cartao)}</option>`).join('');
+
+        if (cartoes.includes(atual)) select.value = atual;
+    }
+
+    function familyInvoiceEnsurePanelCardFilter() {
+        if (typeof familyPersonGarantirFiltroFaturas === 'function') {
+            familyPersonGarantirFiltroFaturas();
+        }
+
+        const filtros = document.getElementById('invoicePaymentFilters');
+        const competencia = document.getElementById('invoicePaymentCompetencia');
+        if (!filtros || !competencia) return;
+
+        let select = document.getElementById('invoicePaymentCartao');
+        if (!select) {
+            select = document.createElement('select');
+            select.id = 'invoicePaymentCartao';
+            select.setAttribute('aria-label', 'Cartão da fatura');
+            select.addEventListener('change', () => {
+                familyInvoiceRenderPanel();
+                if (typeof renderProximasFaturas === 'function') renderProximasFaturas();
+            });
+            filtros.insertBefore(select, competencia);
+        }
+
+        familyInvoicePopulatePanelCardFilter();
+    }
+
+    function familyInvoiceApplyPanelCardFilter() {
+        const selectCartao = document.getElementById('invoicePaymentCartao');
+        const cartao = selectCartao?.value || '';
+        if (!cartao) return;
+
+        const competencia = document.getElementById('invoicePaymentCompetencia')?.value || '';
+        const pessoa = document.getElementById('invoicePaymentPessoa')?.value || '';
+        const grid = document.getElementById('invoicePaymentGrid');
+        const summary = document.getElementById('invoicePaymentSummary');
+        if (!grid || !summary || !competenciaValida(competencia)) return;
+
+        let encontrouCard = false;
+        grid.querySelectorAll('.invoice-payment-card').forEach(card => {
+            const nome = card.querySelector('.invoice-payment-card-head strong')?.textContent?.trim() || '';
+            if (nome === cartao) {
+                encontrouCard = true;
+            } else {
+                card.remove();
+            }
+        });
+
+        if (pessoa) {
+            const totalPessoaCartao = typeof familyPersonInvoiceTotalCents === 'function'
+                ? familyPersonInvoiceTotalCents(competencia, cartao, pessoa)
+                : 0;
+            const totalFaturaCartao = familyInvoiceTotalCents(competencia, cartao);
+            const qtd = typeof familyPersonInvoiceQtd === 'function'
+                ? familyPersonInvoiceQtd(competencia, cartao, pessoa)
+                : 0;
+
+            summary.innerHTML = `
+                <div><span>Total de ${escapeHTML(pessoa)} no ${escapeHTML(cartao)} em ${escapeHTML(formatarCompetencia(competencia))}</span><strong>${formatarMoeda(familyInvoiceFromCents(totalPessoaCartao))}</strong></div>
+                <div><span>Fatura do cartão</span><strong>${formatarMoeda(familyInvoiceFromCents(totalFaturaCartao))}</strong></div>
+                <div><span>Lançamentos</span><strong>${qtd}</strong></div>
+            `;
+
+            if (!encontrouCard || totalPessoaCartao <= 0) {
+                grid.innerHTML = `<div class="invoice-payment-empty">${escapeHTML(pessoa)} não possui lançamentos no cartão ${escapeHTML(cartao)} nesta fatura.</div>`;
+            }
+            return;
+        }
+
+        const total = familyInvoiceTotalCents(competencia, cartao);
+        const pagoRegistrado = familyInvoicePaidCents(competencia, cartao);
+        const pago = total > 0 ? Math.min(pagoRegistrado, total) : 0;
+        const falta = Math.max(total - pago, 0);
+
+        summary.innerHTML = `
+            <div><span>Total do ${escapeHTML(cartao)} em ${escapeHTML(formatarCompetencia(competencia))}</span><strong>${formatarMoeda(familyInvoiceFromCents(total))}</strong></div>
+            <div><span>Já pago</span><strong>${formatarMoeda(familyInvoiceFromCents(pago))}</strong></div>
+            <div><span>Falta pagar</span><strong>${formatarMoeda(familyInvoiceFromCents(falta))}</strong></div>
+        `;
+
+        if (!encontrouCard) {
+            grid.innerHTML = `<div class="invoice-payment-empty">O cartão ${escapeHTML(cartao)} não possui lançamentos nesta fatura.</div>`;
+        }
+    }
+
+    if (typeof familyInvoiceRenderPanel === 'function') {
+        const familyInvoiceCardFilterRenderOriginal = familyInvoiceRenderPanel;
+        familyInvoiceRenderPanel = function(...args) {
+            familyInvoiceEnsurePanelCardFilter();
+            const result = familyInvoiceCardFilterRenderOriginal.apply(this, args);
+            familyInvoicePopulatePanelCardFilter();
+            familyInvoiceApplyPanelCardFilter();
+            if (typeof renderProximasFaturas === 'function') renderProximasFaturas();
+            return result;
+        };
+    }
+
+    if (typeof atualizarInterfaceCatalogo === 'function') {
+        const familyInvoiceCardFilterCatalogOriginal = atualizarInterfaceCatalogo;
+        atualizarInterfaceCatalogo = function(...args) {
+            const result = familyInvoiceCardFilterCatalogOriginal.apply(this, args);
+            familyInvoicePopulatePanelCardFilter();
+            return result;
+        };
+    }
+
+    familyInvoiceEnsurePanelCardFilter();
+    familyInvoiceRenderPanel();
+})();
