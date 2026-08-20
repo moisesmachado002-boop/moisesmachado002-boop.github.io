@@ -1,0 +1,12 @@
+/* v2.10.0 - painel compacto de integridade dos dados */
+.family-integrity-panel{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:0 0 14px;padding:12px 14px;border:1px solid #dbe4ee;border-radius:12px;background:#f8fafc;box-shadow:0 6px 16px rgba(15,23,42,.05)}
+.family-integrity-copy{display:flex;flex-direction:column;gap:3px;min-width:0}
+.family-integrity-copy strong{font-size:13px;color:#0f172a}
+.family-integrity-copy span{font-size:11px;color:#64748b;overflow-wrap:anywhere}
+.family-integrity-panel.integrity-ok{border-color:#bbf7d0;background:#f0fdf4}
+.family-integrity-panel.integrity-ok .family-integrity-copy strong{color:#166534}
+.family-integrity-panel.integrity-warning{border-color:#fde68a;background:#fffbeb}
+.family-integrity-panel.integrity-warning .family-integrity-copy strong{color:#92400e}
+.family-integrity-panel button{flex:0 0 auto}
+@media(max-width:640px){.family-integrity-panel{align-items:stretch;flex-direction:column}.family-integrity-panel button{width:100%}}
+@media print{.family-integrity-panel{display:none!important}}
