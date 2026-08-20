@@ -1,0 +1,48 @@
+/* v2.12.0 - ponte estável para extensões futuras.
+   Mantém as funções atuais intactas e publica eventos após suas execuções,
+   evitando que novos módulos precisem criar mais cadeias de sobrescrita. */
+(() => {
+    const core = window.familyCore;
+    if (!core?.emit) return;
+
+    function bridge(functionName, eventName) {
+        const original = globalThis[functionName];
+        if (typeof original !== 'function' || original.__familyCoreBridge) return;
+
+        const wrapped = function(...args) {
+            const result = original.apply(this, args);
+            const publish = () => core.emit(eventName, {
+                functionName,
+                at: new Date().toISOString()
+            });
+
+            if (result && typeof result.then === 'function') {
+                Promise.resolve(result).then(publish, () => {});
+            } else {
+                publish();
+            }
+            return result;
+        };
+
+        Object.defineProperty(wrapped, '__familyCoreBridge', {
+            value: true,
+            enumerable: false
+        });
+        Object.defineProperty(wrapped, '__familyCoreOriginal', {
+            value: original,
+            enumerable: false
+        });
+
+        globalThis[functionName] = wrapped;
+    }
+
+    bridge('salvarLocal', 'data:saved');
+    bridge('carregarTabela', 'ui:table-rendered');
+    bridge('atualizarInterfaceCatalogo', 'catalog:rendered');
+    bridge('familyInvoiceRenderPanel', 'invoices:rendered');
+    bridge('sincronizarCatalogo', 'catalog:synced');
+    bridge('familyInvoiceSync', 'invoices:synced');
+    bridge('familyCardSync', 'cards:synced');
+
+    core.registerModule?.('event-bridge', { area: 'infraestrutura', version: '2.12.0' });
+})();
