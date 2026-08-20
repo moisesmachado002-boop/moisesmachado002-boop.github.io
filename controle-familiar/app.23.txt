@@ -1,0 +1,183 @@
+/* v2.9.1 - filtro compacto de competência na aba Lançamentos.
+   O select #filtroFatura continua sendo a fonte real do filtro; esta camada só troca a navegação visual. */
+(() => {
+    const SELECT_ID = 'filtroFatura';
+    const WRAP_ID = 'familyHistoryMonthFilter';
+    let centerComp = '';
+
+    function nativeSelect() {
+        return document.getElementById(SELECT_ID);
+    }
+
+    function competencias() {
+        const select = nativeSelect();
+        if (!select) return [];
+        return [...select.options]
+            .map(op => op.value)
+            .filter(comp => typeof competenciaValida === 'function' && competenciaValida(comp))
+            .sort();
+    }
+
+    function labelComp(comp) {
+        if (!comp) return 'Todas as Faturas';
+        return typeof formatarCompetencia === 'function' ? formatarCompetencia(comp) : comp;
+    }
+
+    function criar() {
+        const select = nativeSelect();
+        if (!select) return null;
+
+        let wrap = document.getElementById(WRAP_ID);
+        if (wrap) return wrap;
+
+        select.classList.add('family-history-month-native');
+        select.setAttribute('aria-hidden', 'true');
+        select.tabIndex = -1;
+
+        wrap = document.createElement('div');
+        wrap.id = WRAP_ID;
+        wrap.className = 'family-history-month-filter';
+        wrap.innerHTML = `
+            <button type="button" class="family-history-month-trigger" aria-haspopup="true" aria-expanded="false">Todas as Faturas</button>
+            <div class="family-history-month-menu" hidden>
+                <button type="button" class="family-history-month-all">Todas as Faturas</button>
+                <button type="button" class="family-history-month-more family-history-month-newer">▲ <span>Mais futuros</span></button>
+                <button type="button" class="family-history-month-option family-history-month-next"></button>
+                <button type="button" class="family-history-month-option family-history-month-current"></button>
+                <button type="button" class="family-history-month-option family-history-month-prev"></button>
+                <button type="button" class="family-history-month-more family-history-month-older"><span>Mais antigos</span> ▼</button>
+            </div>
+        `;
+        select.insertAdjacentElement('afterend', wrap);
+
+        const trigger = wrap.querySelector('.family-history-month-trigger');
+        const menu = wrap.querySelector('.family-history-month-menu');
+
+        trigger?.addEventListener('click', () => {
+            const abrindo = menu?.hidden !== false;
+            if (abrindo) abrir();
+            else fechar();
+        });
+
+        wrap.querySelector('.family-history-month-all')?.addEventListener('click', () => selecionar(''));
+        wrap.querySelector('.family-history-month-newer')?.addEventListener('click', () => moverCentro(1));
+        wrap.querySelector('.family-history-month-older')?.addEventListener('click', () => moverCentro(-1));
+        wrap.querySelectorAll('.family-history-month-option').forEach(button => {
+            button.addEventListener('click', () => {
+                const comp = button.dataset.competencia || '';
+                if (comp) selecionar(comp);
+            });
+        });
+
+        document.addEventListener('click', event => {
+            if (!wrap.contains(event.target)) fechar();
+        });
+        document.addEventListener('keydown', event => {
+            if (event.key === 'Escape') fechar();
+        });
+
+        select.addEventListener('change', atualizarTrigger);
+        new MutationObserver(() => {
+            atualizarTrigger();
+            if (menu && !menu.hidden) renderMenu();
+        }).observe(select, { childList: true });
+
+        atualizarTrigger();
+        return wrap;
+    }
+
+    function abrir() {
+        const wrap = criar();
+        const select = nativeSelect();
+        const menu = wrap?.querySelector('.family-history-month-menu');
+        const trigger = wrap?.querySelector('.family-history-month-trigger');
+        const comps = competencias();
+        if (!wrap || !select || !menu || !comps.length) return;
+
+        const atualReal = typeof competenciaAtualLocal === 'function' ? competenciaAtualLocal() : '';
+        centerComp = comps.includes(select.value)
+            ? select.value
+            : (comps.includes(atualReal) ? atualReal : comps[comps.length - 1]);
+
+        renderMenu();
+        menu.hidden = false;
+        trigger?.setAttribute('aria-expanded', 'true');
+    }
+
+    function fechar() {
+        const wrap = document.getElementById(WRAP_ID);
+        const menu = wrap?.querySelector('.family-history-month-menu');
+        const trigger = wrap?.querySelector('.family-history-month-trigger');
+        if (menu) menu.hidden = true;
+        trigger?.setAttribute('aria-expanded', 'false');
+    }
+
+    function selecionar(comp) {
+        const select = nativeSelect();
+        if (!select) return;
+        if (comp && ![...select.options].some(op => op.value === comp)) return;
+        select.value = comp;
+        select.dispatchEvent(new Event('change', { bubbles: true }));
+        atualizarTrigger();
+        fechar();
+    }
+
+    function moverCentro(delta) {
+        const comps = competencias();
+        if (!comps.length) return;
+        let index = comps.indexOf(centerComp);
+        if (index < 0) index = comps.length - 1;
+        const destino = Math.max(0, Math.min(comps.length - 1, index + delta));
+        centerComp = comps[destino];
+        renderMenu();
+    }
+
+    function configurarOpcao(button, comp, fallback) {
+        if (!button) return;
+        const disponivel = Boolean(comp);
+        button.disabled = !disponivel;
+        button.dataset.competencia = comp || '';
+        button.textContent = disponivel ? labelComp(comp) : fallback;
+        const selecionado = comp && comp === nativeSelect()?.value;
+        button.classList.toggle('selected', Boolean(selecionado));
+        button.setAttribute('aria-current', selecionado ? 'true' : 'false');
+    }
+
+    function renderMenu() {
+        const wrap = criar();
+        const comps = competencias();
+        if (!wrap || !comps.length) return;
+
+        if (!comps.includes(centerComp)) {
+            const atualReal = typeof competenciaAtualLocal === 'function' ? competenciaAtualLocal() : '';
+            centerComp = comps.includes(nativeSelect()?.value)
+                ? nativeSelect().value
+                : (comps.includes(atualReal) ? atualReal : comps[comps.length - 1]);
+        }
+
+        const index = comps.indexOf(centerComp);
+        const anterior = index > 0 ? comps[index - 1] : '';
+        const posterior = index < comps.length - 1 ? comps[index + 1] : '';
+
+        configurarOpcao(wrap.querySelector('.family-history-month-next'), posterior, 'Sem mês posterior');
+        configurarOpcao(wrap.querySelector('.family-history-month-current'), centerComp, 'Mês atual');
+        configurarOpcao(wrap.querySelector('.family-history-month-prev'), anterior, 'Sem mês anterior');
+
+        const newer = wrap.querySelector('.family-history-month-newer');
+        const older = wrap.querySelector('.family-history-month-older');
+        if (newer) newer.disabled = index >= comps.length - 1;
+        if (older) older.disabled = index <= 0;
+    }
+
+    function atualizarTrigger() {
+        const wrap = criar();
+        const select = nativeSelect();
+        const trigger = wrap?.querySelector('.family-history-month-trigger');
+        if (!select || !trigger) return;
+        trigger.textContent = select.value ? labelComp(select.value) : 'Todas as Faturas';
+    }
+
+    criar();
+    setTimeout(criar, 250);
+    setTimeout(criar, 1000);
+})();
