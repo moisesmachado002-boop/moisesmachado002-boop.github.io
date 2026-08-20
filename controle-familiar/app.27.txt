@@ -1,0 +1,195 @@
+/* v2.12.0 - autotestes de regressão somente de leitura.
+   Não cria, edita ou remove lançamentos. O resultado fica disponível em
+   window.__familySelfTestLastReport e window.__familySelfTestRun(). */
+(() => {
+    function addResult(results, name, status, detail = '') {
+        results.push({ name, status, detail: String(detail || '') });
+    }
+
+    function runTest(results, name, test) {
+        try {
+            const value = test();
+            if (value && typeof value === 'object' && value.skip) {
+                addResult(results, name, 'skip', value.detail || 'Não aplicável neste momento.');
+                return;
+            }
+            if (value === true || value === undefined) addResult(results, name, 'pass');
+            else if (value && typeof value === 'object' && value.ok) addResult(results, name, 'pass', value.detail || '');
+            else addResult(results, name, 'fail', value?.detail || value || 'Falhou.');
+        } catch (error) {
+            addResult(results, name, 'fail', error?.message || error);
+        }
+    }
+
+    function centsValid(value) {
+        const number = Number(value);
+        return Number.isFinite(number) && number > 0 && Math.abs(number * 100 - Math.round(number * 100)) < 1e-7;
+    }
+
+    function parcelGroups() {
+        const groups = new Map();
+        (Array.isArray(listaGastos) ? listaGastos : []).forEach(g => {
+            if (typeof gastoParcelado !== 'function' || !gastoParcelado(g)) return;
+            const id = String(g.parcelamentoId || '');
+            if (!groups.has(id)) groups.set(id, []);
+            groups.get(id).push(g);
+        });
+        return groups;
+    }
+
+    function registerKnownModules() {
+        const core = window.familyCore;
+        if (!core?.registerModule) return;
+        const definitions = [
+            ['data', typeof listaGastos !== 'undefined', 'lançamentos'],
+            ['cloud', Boolean(document.getElementById('familyCloudPanel')), 'sincronização'],
+            ['catalog', typeof familyCatalog !== 'undefined', 'cadastros'],
+            ['invoices', typeof familyInvoicePayments !== 'undefined', 'faturas'],
+            ['cards', typeof familyCardSettings !== 'undefined', 'cartões'],
+            ['backup', Boolean(window.__familyBackupV2), 'backup'],
+            ['integrity', typeof window.__familyIntegrityAudit === 'function', 'integridade']
+        ];
+        definitions.forEach(([name, available, area]) => {
+            if (available) core.registerModule(name, { area });
+        });
+        core.registerModule('self-tests', { area: 'qualidade', version: '2.12.0' });
+    }
+
+    function familySelfTestRun() {
+        const results = [];
+
+        runTest(results, 'Versão do portal', () => ({
+            ok: String(window.__CONTROLE_FAMILIAR_VERSION || '') === '2.12.0',
+            detail: `Versão carregada: ${window.__CONTROLE_FAMILIAR_VERSION || 'não informada'}`
+        }));
+
+        runTest(results, 'Núcleo compartilhado', () => ({
+            ok: Boolean(window.familyCore?.registerModule && window.familyCore?.on && window.familyCore?.emit),
+            detail: 'Registro de módulos e eventos internos disponível.'
+        }));
+
+        runTest(results, 'IDs únicos', () => {
+            const ids = (listaGastos || []).map(g => String(g?.id || '')).filter(Boolean);
+            return {
+                ok: ids.length === (listaGastos || []).length && new Set(ids).size === ids.length,
+                detail: `${ids.length} IDs verificados.`
+            };
+        });
+
+        runTest(results, 'Valores em centavos', () => {
+            const invalid = (listaGastos || []).filter(g => !centsValid(g?.valor));
+            return {
+                ok: invalid.length === 0,
+                detail: invalid.length ? `${invalid.length} valor(es) inválido(s).` : `${(listaGastos || []).length} valores válidos.`
+            };
+        });
+
+        runTest(results, 'Mês compatível com competência', () => {
+            const invalid = (listaGastos || []).filter(g => {
+                if (typeof competenciaValida !== 'function' || !competenciaValida(g?.competenciaFatura)) return false;
+                return String(g?.mesFatura || '') !== String(g.competenciaFatura).slice(5, 7);
+            });
+            return {
+                ok: invalid.length === 0,
+                detail: invalid.length ? `${invalid.length} divergência(s).` : 'Nenhuma divergência.'
+            };
+        });
+
+        runTest(results, 'Sequência dos parcelamentos', () => {
+            const problems = [];
+            parcelGroups().forEach((items, id) => {
+                const totals = [...new Set(items.map(g => Number(g.totalParcelas)))];
+                if (totals.length !== 1) {
+                    problems.push(`${id}: total inconsistente`);
+                    return;
+                }
+                const total = totals[0];
+                const numbers = new Set(items.map(g => Number(g.parcelaAtual)));
+                for (let n = 1; n <= total; n++) {
+                    if (!numbers.has(n)) problems.push(`${id}: falta ${n}/${total}`);
+                }
+                if (numbers.size !== items.length) problems.push(`${id}: parcela duplicada`);
+            });
+            return {
+                ok: problems.length === 0,
+                detail: problems.length ? problems.slice(0, 4).join(' · ') : `${parcelGroups().size} parcelamento(s) íntegro(s).`
+            };
+        });
+
+        runTest(results, 'Auditoria de integridade', () => {
+            if (typeof window.__familyIntegrityAudit !== 'function') return { skip: true, detail: 'Auditor ainda não carregado.' };
+            const report = window.__familyIntegrityAudit();
+            return {
+                ok: report.erros.length === 0 && report.avisos.length === 0,
+                detail: `${report.erros.length} erro(s), ${report.avisos.length} aviso(s).`
+            };
+        });
+
+        runTest(results, 'Backup completo v2', () => {
+            if (!window.__familyBackupV2?.snapshot) return { skip: true, detail: 'Módulo de backup não carregado.' };
+            const snapshot = window.__familyBackupV2.snapshot();
+            const ok = snapshot?.schema === 'controle-familiar-backup-v2' &&
+                Array.isArray(snapshot?.gastos) &&
+                snapshot?.catalogo &&
+                snapshot?.pagamentos &&
+                snapshot?.configuracoesCartoes &&
+                snapshot?.preferencias;
+            return {
+                ok: Boolean(ok),
+                detail: ok ? 'Lançamentos, cadastros, pagamentos, cartões e preferências presentes.' : 'Estrutura de backup incompleta.'
+            };
+        });
+
+        runTest(results, 'Conversão monetária', () => {
+            if (typeof familyInvoiceToCents !== 'function' || typeof familyInvoiceFromCents !== 'function') {
+                return { skip: true, detail: 'Funções monetárias não carregadas.' };
+            }
+            const samples = [0.01, 1.23, 99.99, 1234.56];
+            const ok = samples.every(value => familyInvoiceFromCents(familyInvoiceToCents(value)) === value);
+            return { ok, detail: `${samples.length} amostras verificadas.` };
+        });
+
+        runTest(results, 'Chave de pagamento de fatura', () => {
+            if (typeof familyInvoiceKey !== 'function' || typeof familyInvoiceParseKey !== 'function') {
+                return { skip: true, detail: 'Controle de faturas não carregado.' };
+            }
+            const parsed = familyInvoiceParseKey(familyInvoiceKey('2026-09', 'CARTÃO TESTE'));
+            return {
+                ok: parsed?.competencia === '2026-09' && parsed?.cartao === 'CARTÃO TESTE',
+                detail: 'Criação e leitura da chave conferidas.'
+            };
+        });
+
+        runTest(results, 'Cliente Supabase compartilhado', () => {
+            if (!window.supabase?.createClient) return { skip: true, detail: 'Biblioteca Supabase ainda não carregada ou aparelho offline.' };
+            return {
+                ok: Boolean(window.supabase.createClient.__familySharedClientFactory),
+                detail: window.supabase.createClient.__familySharedClientFactory
+                    ? `${window.familyCore?.sharedClientCount?.() ?? 0} instância(s) compartilhada(s) ativa(s).`
+                    : 'A fábrica compartilhada não foi aplicada.'
+            };
+        });
+
+        const passed = results.filter(item => item.status === 'pass').length;
+        const failed = results.filter(item => item.status === 'fail').length;
+        const skipped = results.filter(item => item.status === 'skip').length;
+        const report = {
+            ok: failed === 0,
+            appVersion: String(window.__CONTROLE_FAMILIAR_VERSION || ''),
+            ranAt: new Date().toISOString(),
+            passed,
+            failed,
+            skipped,
+            results
+        };
+
+        window.__familySelfTestLastReport = report;
+        if (report.ok) console.info('Autotestes Controle Familiar: OK', report);
+        else console.warn('Autotestes Controle Familiar: falha detectada', report);
+        return report;
+    }
+
+    registerKnownModules();
+    window.__familySelfTestRun = familySelfTestRun;
+    setTimeout(familySelfTestRun, 900);
+})();
