@@ -31,6 +31,7 @@ Este documento existe para tornar futuras alterações mais previsíveis e reduz
 | Apresentação | identidade visual e próximas faturas | `app.18`, `app.19` |
 | Backup | exportação/importação completa | `app.21`, `app.24` |
 | Integridade | validações e auditoria dos dados | `app.25` |
+| Ponte de eventos | ponto estável para futuras extensões | `app.28` |
 | Qualidade | autotestes somente de leitura | `app.27` |
 
 ## Supabase
@@ -45,6 +46,22 @@ A tabela familiar continua sendo `family_finance_state`.
 - `card_settings`: limites e datas dos cartões.
 
 Cada área deve continuar usando seu próprio marcador temporal interno/específico para não confundir alterações de naturezas diferentes.
+
+## Ponte de eventos
+
+`app.28` fica no fim da cadeia funcional e publica eventos depois das funções principais. O objetivo é que novas funcionalidades possam usar `familyCore.on(...)` em vez de sobrescrever novamente funções globais.
+
+Eventos disponíveis inicialmente:
+
+- `data:saved`
+- `ui:table-rendered`
+- `catalog:rendered`
+- `invoices:rendered`
+- `catalog:synced`
+- `invoices:synced`
+- `cards:synced`
+
+As sobrescritas antigas foram preservadas nesta versão para evitar uma refatoração de alto risco. A partir daqui, novas modificações devem preferir essa ponte.
 
 ## Regras para novas modificações
 
