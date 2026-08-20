@@ -1,0 +1,200 @@
+/* v2.10.0 - Backup completo v2 do Controle Familiar.
+   Inclui lançamentos, cadastros, pagamentos, configurações dos cartões e preferências.
+   Mantém compatibilidade com backups antigos que continham somente lançamentos. */
+(() => {
+    const FAMILY_BACKUP_SCHEMA = 'controle-familiar-backup-v2';
+    const FAMILY_BACKUP_SCHEMA_VERSION = 2;
+
+    function familyBackupValorDuasCasas(valor) {
+        const numero = Number(valor);
+        if (!Number.isFinite(numero) || numero <= 0) return false;
+        return Math.abs(numero * 100 - Math.round(numero * 100)) < 1e-7;
+    }
+
+    function familyBackupNormalizarGastos(dados) {
+        const erros = [];
+        const idsUsados = new Set();
+
+        (Array.isArray(dados) ? dados : []).forEach((g, index) => {
+            const erro = typeof validarEstruturaGasto === 'function'
+                ? validarEstruturaGasto(g)
+                : '';
+            if (erro) erros.push(`Registro ${index + 1}: ${erro}`);
+            else if (!familyBackupValorDuasCasas(g?.valor)) {
+                erros.push(`Registro ${index + 1}: valor precisa ter no máximo 2 casas decimais`);
+            }
+        });
+
+        if (erros.length) return { gastos: [], erros };
+
+        const gastos = dados.map(g => {
+            const item = typeof normalizarGasto === 'function' ? normalizarGasto(g) : { ...g };
+            item.valor = Math.round(Number(item.valor) * 100) / 100;
+            if (!item.id || idsUsados.has(item.id)) item.id = gerarId();
+            idsUsados.add(item.id);
+            return item;
+        });
+
+        return { gastos, erros: [] };
+    }
+
+    function familyBackupSnapshot() {
+        const catalogo = typeof familyCatalog !== 'undefined' && typeof normalizarCatalogo === 'function'
+            ? normalizarCatalogo(familyCatalog)
+            : null;
+        const pagamentos = typeof familyInvoicePayments !== 'undefined' && typeof familyInvoiceNormalizeMap === 'function'
+            ? familyInvoiceNormalizeMap(familyInvoicePayments)
+            : {};
+        const configuracoesCartoes = typeof familyCardSettings !== 'undefined' && typeof familyCardNormalizeMap === 'function'
+            ? familyCardNormalizeMap(familyCardSettings)
+            : {};
+
+        let competenciaPadrao = '';
+        try {
+            competenciaPadrao = localStorage.getItem(typeof FATURA_PADRAO_KEY !== 'undefined' ? FATURA_PADRAO_KEY : '') || '';
+        } catch {}
+
+        return {
+            schema: FAMILY_BACKUP_SCHEMA,
+            schemaVersion: FAMILY_BACKUP_SCHEMA_VERSION,
+            appVersion: String(window.__CONTROLE_FAMILIAR_VERSION || ''),
+            exportedAt: new Date().toISOString(),
+            gastos: listaGastos.map(g => typeof normalizarGasto === 'function' ? normalizarGasto(g) : { ...g }),
+            catalogo,
+            pagamentos,
+            configuracoesCartoes,
+            preferencias: {
+                competenciaFaturaPadrao: competenciaValida(competenciaPadrao) ? competenciaPadrao : ''
+            }
+        };
+    }
+
+    exportarJSON = function() {
+        const snapshot = familyBackupSnapshot();
+        const blob = new Blob([JSON.stringify(snapshot, null, 2)], { type: 'application/json;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = nomeBackupHoje();
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        URL.revokeObjectURL(url);
+    };
+
+    function familyBackupAplicarCatalogo(raw, agora) {
+        if (!raw || typeof familyCatalog === 'undefined' || typeof normalizarCatalogo !== 'function') return;
+        familyCatalog = normalizarCatalogo(raw);
+        familyCatalog.updatedAt = agora;
+        try {
+            localStorage.setItem(FAMILY_CATALOG_KEY, JSON.stringify(familyCatalog));
+        } catch {}
+        if (typeof salvarCatalogoIndexedDB === 'function') salvarCatalogoIndexedDB().catch(() => {});
+        if (typeof atualizarInterfaceCatalogo === 'function') atualizarInterfaceCatalogo();
+        if (navigator.onLine && typeof sincronizarCatalogo === 'function') {
+            setTimeout(() => sincronizarCatalogo(false), 180);
+        }
+    }
+
+    function familyBackupAplicarPagamentos(raw, agora) {
+        if (typeof familyInvoicePayments === 'undefined' || typeof familyInvoiceNormalizeMap !== 'function') return;
+        const normalizados = familyInvoiceNormalizeMap(raw || {});
+        familyInvoicePayments = Object.fromEntries(
+            Object.entries(normalizados).map(([chave, entry]) => [chave, { ...entry, updatedAt: agora }])
+        );
+        if (typeof familyInvoiceSaveLocal === 'function') familyInvoiceSaveLocal({ sync: true });
+        else localStorage.setItem(FAMILY_INVOICE_PAYMENT_KEY, JSON.stringify(familyInvoicePayments));
+    }
+
+    function familyBackupAplicarConfiguracoesCartoes(raw, agora) {
+        if (typeof familyCardSettings === 'undefined' || typeof familyCardNormalizeMap !== 'function') return;
+        const normalizados = familyCardNormalizeMap(raw || {});
+        familyCardSettings = Object.fromEntries(
+            Object.entries(normalizados).map(([nome, entry]) => [nome, { ...entry, updatedAt: agora }])
+        );
+        if (typeof familyCardSaveLocal === 'function') familyCardSaveLocal({ sync: true });
+        else localStorage.setItem(FAMILY_CARD_SETTINGS_KEY, JSON.stringify(familyCardSettings));
+    }
+
+    function familyBackupAtualizarTela() {
+        if (typeof popularSelects === 'function') popularSelects();
+        if (typeof popularFiltroAnos === 'function') popularFiltroAnos();
+        if (typeof popularFiltroCompetencias === 'function') popularFiltroCompetencias();
+        if (typeof carregarTabela === 'function') carregarTabela();
+        if (typeof limparFormulario === 'function') limparFormulario();
+        if (typeof renderAvisoLegado === 'function') renderAvisoLegado();
+        if (typeof familyInvoiceRenderPanel === 'function') familyInvoiceRenderPanel();
+        if (typeof renderProximasFaturas === 'function') renderProximasFaturas();
+    }
+
+    importarJSON = function(event) {
+        const file = event.target.files?.[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            try {
+                const conteudo = JSON.parse(e.target.result);
+                const backupV2 = Boolean(
+                    conteudo &&
+                    !Array.isArray(conteudo) &&
+                    conteudo.schema === FAMILY_BACKUP_SCHEMA &&
+                    Number(conteudo.schemaVersion) >= FAMILY_BACKUP_SCHEMA_VERSION
+                );
+                const dados = backupV2
+                    ? conteudo.gastos
+                    : (Array.isArray(conteudo) ? conteudo : (Array.isArray(conteudo?.gastos) ? conteudo.gastos : null));
+
+                if (!Array.isArray(dados)) {
+                    alert('O arquivo JSON não tem o formato esperado.');
+                    return;
+                }
+
+                const { gastos, erros } = familyBackupNormalizarGastos(dados);
+                if (erros.length) {
+                    const resumo = erros.slice(0, 6).join('\n');
+                    const extra = erros.length > 6 ? `\n... e mais ${erros.length - 6} erro(s).` : '';
+                    alert(`O backup possui dados inválidos e não foi importado:\n\n${resumo}${extra}`);
+                    return;
+                }
+
+                let mensagem = backupV2
+                    ? `Restaurar o backup completo com ${gastos.length} lançamento(s), cadastros, pagamentos e configurações dos cartões?`
+                    : `Este é um backup antigo com ${gastos.length} lançamento(s). Restaurar somente os lançamentos?\n\nCadastros, pagamentos e configurações atuais dos cartões serão mantidos.`;
+
+                if (!confirm(mensagem)) return;
+
+                const agora = new Date().toISOString();
+                listaGastos = gastos;
+                salvarLocal();
+
+                if (backupV2) {
+                    familyBackupAplicarCatalogo(conteudo.catalogo, agora);
+                    familyBackupAplicarPagamentos(conteudo.pagamentos, agora);
+                    familyBackupAplicarConfiguracoesCartoes(conteudo.configuracoesCartoes, agora);
+
+                    const comp = conteudo?.preferencias?.competenciaFaturaPadrao || '';
+                    if (competenciaValida(comp) && typeof FATURA_PADRAO_KEY !== 'undefined') {
+                        try { localStorage.setItem(FATURA_PADRAO_KEY, comp); } catch {}
+                    }
+                }
+
+                familyBackupAtualizarTela();
+                alert(backupV2
+                    ? 'Backup completo restaurado com sucesso.'
+                    : 'Backup antigo restaurado. Somente os lançamentos foram substituídos.');
+            } catch (err) {
+                console.error(err);
+                alert('Erro ao ler o arquivo JSON.');
+            } finally {
+                event.target.value = '';
+            }
+        };
+        reader.readAsText(file);
+    };
+
+    window.__familyBackupV2 = {
+        schema: FAMILY_BACKUP_SCHEMA,
+        snapshot: familyBackupSnapshot
+    };
+})();
