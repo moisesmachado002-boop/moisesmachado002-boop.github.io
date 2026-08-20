@@ -45,6 +45,7 @@ const STATIC_ASSETS = [
   './app.23.txt?v=2.12.0',
   './app.24.txt?v=2.12.0',
   './app.25.txt?v=2.12.0',
+  './app.28.txt?v=2.12.0',
   './app.27.txt?v=2.12.0'
 ];
 
