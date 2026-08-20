@@ -1,14 +1,20 @@
 (async () => {
     const FAMILY_CLOUD_TABLE = 'family_finance_state';
     const FAMILY_CLOUD_META_KEY = 'dadosFinanceirosFamiliaresCloudMeta';
+    const FAMILY_CLOUD_PENDING_KEY = 'family-finance-cloud-pending-v2';
+    const FAMILY_CLOUD_DEVICE_KEY = 'family-finance-device-id-v1';
     const FAMILY_SUPABASE_URL = 'https://pqcltcegwmyuzytivakt.supabase.co';
     const FAMILY_SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_3B61vWHjC_Qu3ksO0GJVXA_d_ytJyop';
     const FAMILY_AUTH_STORAGE_KEY = 'family-finance-auth-pqcltcegwmyuzytivakt';
+    const FAMILY_CLOUD_RETRY_MS = 5000;
+    const FAMILY_CLOUD_REMOTE_POLL_MS = 15000;
 
     let client = null;
     let currentUser = null;
     let saveTimer = null;
     let pollTimer = null;
+    let remoteTimer = null;
+    let retryTimer = null;
     let syncing = false;
     let lastObservedLocal = localStorage.getItem(STORAGE_KEY) || '[]';
 
@@ -102,9 +108,14 @@
         document.getElementById('familyCloudSync')?.addEventListener('click', () => sincronizarAgora(true));
         document.getElementById('familyCloudLogout')?.addEventListener('click', logoutCloud);
         window.addEventListener('online', () => {
-            if (currentUser) sincronizarAgora(false);
+            if (currentUser) setTimeout(() => sincronizarAgora(false), 150);
         });
         window.addEventListener('offline', () => setCloudStatus('Sem internet', 'offline'));
+        document.addEventListener('visibilitychange', () => {
+            if (!document.hidden && currentUser && navigator.onLine) {
+                setTimeout(() => sincronizarAgora(false), 180);
+            }
+        });
     }
 
     function setCloudStatus(texto, classe = '') {
@@ -179,7 +190,7 @@
 
     async function logoutCloud() {
         if (!client) return;
-        await pushCloud(true).catch(() => {});
+        await pushCloud(true).catch(() => false);
         await client.auth.signOut({ scope: 'local' });
         desativarUsuarioNuvem();
     }
@@ -212,9 +223,139 @@
         return meta;
     }
 
-    function payloadLocal() {
+    function obterDeviceId() {
+        try {
+            let id = localStorage.getItem(FAMILY_CLOUD_DEVICE_KEY) || '';
+            if (!id) {
+                id = typeof crypto?.randomUUID === 'function'
+                    ? crypto.randomUUID()
+                    : `device-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+                localStorage.setItem(FAMILY_CLOUD_DEVICE_KEY, id);
+            }
+            return id;
+        } catch {
+            return 'device-local';
+        }
+    }
+
+    function parseListaRaw(raw) {
+        try {
+            const parsed = JSON.parse(raw || '[]');
+            return Array.isArray(parsed) ? parsed.map(normalizarGasto) : [];
+        } catch {
+            return [];
+        }
+    }
+
+    function gastoComparavel(gasto) {
+        try {
+            return JSON.stringify(normalizarGasto(gasto));
+        } catch {
+            return JSON.stringify(gasto || {});
+        }
+    }
+
+    function lerPendenciasCloud() {
+        try {
+            const raw = JSON.parse(localStorage.getItem(FAMILY_CLOUD_PENDING_KEY) || '{}');
+            return {
+                upserts: raw && typeof raw.upserts === 'object' && !Array.isArray(raw.upserts) ? raw.upserts : {},
+                deletes: Array.isArray(raw?.deletes) ? raw.deletes.map(String) : [],
+                updatedAt: typeof raw?.updatedAt === 'string' ? raw.updatedAt : null
+            };
+        } catch {
+            return { upserts: {}, deletes: [], updatedAt: null };
+        }
+    }
+
+    function temPendenciasCloud(pendencias = lerPendenciasCloud()) {
+        return Object.keys(pendencias.upserts).length > 0 || pendencias.deletes.length > 0;
+    }
+
+    function salvarPendenciasCloud(pendencias) {
+        if (!temPendenciasCloud(pendencias)) {
+            localStorage.removeItem(FAMILY_CLOUD_PENDING_KEY);
+            return;
+        }
+        localStorage.setItem(FAMILY_CLOUD_PENDING_KEY, JSON.stringify({
+            upserts: pendencias.upserts,
+            deletes: [...new Set(pendencias.deletes.map(String))],
+            updatedAt: pendencias.updatedAt || new Date().toISOString()
+        }));
+    }
+
+    function registrarPendenciasCloud(antesRaw, depoisRaw) {
+        const antes = parseListaRaw(antesRaw);
+        const depois = parseListaRaw(depoisRaw);
+        const antesMap = new Map(antes.filter(g => g?.id).map(g => [String(g.id), g]));
+        const depoisMap = new Map(depois.filter(g => g?.id).map(g => [String(g.id), g]));
+        const pendencias = lerPendenciasCloud();
+        const deletes = new Set(pendencias.deletes.map(String));
+        let mudou = false;
+
+        depoisMap.forEach((gasto, id) => {
+            const anterior = antesMap.get(id);
+            if (!anterior || gastoComparavel(anterior) !== gastoComparavel(gasto)) {
+                pendencias.upserts[id] = normalizarGasto(gasto);
+                deletes.delete(id);
+                mudou = true;
+            }
+        });
+
+        antesMap.forEach((_gasto, id) => {
+            if (!depoisMap.has(id)) {
+                delete pendencias.upserts[id];
+                deletes.add(id);
+                mudou = true;
+            }
+        });
+
+        if (!mudou) return pendencias.updatedAt || null;
+        pendencias.deletes = [...deletes];
+        pendencias.updatedAt = new Date().toISOString();
+        salvarPendenciasCloud(pendencias);
+        return pendencias.updatedAt;
+    }
+
+    function limparPendenciasCloud() {
+        localStorage.removeItem(FAMILY_CLOUD_PENDING_KEY);
+    }
+
+    function aplicarPendenciasCloud(gastos, pendencias = lerPendenciasCloud()) {
+        const mapa = new Map((Array.isArray(gastos) ? gastos : [])
+            .filter(g => g?.id)
+            .map(g => [String(g.id), normalizarGasto(g)]));
+
+        pendencias.deletes.forEach(id => mapa.delete(String(id)));
+        Object.entries(pendencias.upserts).forEach(([id, gasto]) => {
+            mapa.set(String(id), normalizarGasto({ ...gasto, id }));
+        });
+        return [...mapa.values()];
+    }
+
+    function listaComparavel(gastos) {
+        return (Array.isArray(gastos) ? gastos : [])
+            .map(normalizarGasto)
+            .sort((a, b) => String(a.id || '').localeCompare(String(b.id || '')))
+            .map(gastoComparavel)
+            .join('\n');
+    }
+
+    function listasIguais(a, b) {
+        return listaComparavel(a) === listaComparavel(b);
+    }
+
+    function remoteDataUpdatedAt(row) {
+        const interno = row?.data && !Array.isArray(row.data) ? row.data.dataUpdatedAt : null;
+        if (interno && Number.isFinite(Date.parse(interno))) return interno;
+        return row?.updated_at || null;
+    }
+
+    function payloadLocal(dataUpdatedAt) {
         return {
-            version: '2.2.0',
+            version: '2.11.0',
+            dataUpdatedAt,
+            sourceDeviceId: obterDeviceId(),
             gastos: listaGastos.map(normalizarGasto)
         };
     }
@@ -229,52 +370,155 @@
         return [];
     }
 
+    function atualizarTelaDepoisDaNuvem() {
+        popularSelects();
+        popularFiltroAnos();
+        popularFiltroCompetencias();
+        carregarTabela();
+        renderAvisoLegado();
+    }
+
+    function aplicarListaLocal(gastos) {
+        listaGastos = gastos.map(normalizarGasto);
+        salvarLocal();
+        lastObservedLocal = localStorage.getItem(STORAGE_KEY) || '[]';
+        atualizarTelaDepoisDaNuvem();
+    }
+
+    function marcarSincronizado(dataUpdatedAt) {
+        const agora = new Date().toISOString();
+        limparPendenciasCloud();
+        salvarCloudMeta({
+            updatedAt: dataUpdatedAt || agora,
+            lastSyncedAt: agora,
+            lastSyncedDataUpdatedAt: dataUpdatedAt || agora,
+            pendingSync: false,
+            userId: currentUser?.id || null
+        });
+        setCloudStatus('Sincronizado', 'synced');
+    }
+
+    function aplicarCloudLocal(gastos, remoteUpdatedAt) {
+        aplicarListaLocal(gastos);
+        marcarSincronizado(remoteUpdatedAt || new Date().toISOString());
+    }
+
+    function prepararMudancaLocalNaoObservada() {
+        const atual = localStorage.getItem(STORAGE_KEY) || '[]';
+        if (atual === lastObservedLocal) return false;
+        const alteradoEm = registrarPendenciasCloud(lastObservedLocal, atual) || new Date().toISOString();
+        lastObservedLocal = atual;
+        salvarCloudMeta({
+            updatedAt: alteradoEm,
+            pendingSync: true,
+            userId: currentUser?.id || null
+        });
+        return true;
+    }
+
+    function agendarRetry() {
+        clearTimeout(retryTimer);
+        retryTimer = setTimeout(() => {
+            if (currentUser && navigator.onLine && !syncing) sincronizarAgora(false);
+        }, FAMILY_CLOUD_RETRY_MS);
+    }
+
+    function iniciarObservacaoRemota() {
+        clearInterval(remoteTimer);
+        remoteTimer = setInterval(() => {
+            if (currentUser && navigator.onLine && !syncing) sincronizarAgora(false);
+        }, FAMILY_CLOUD_REMOTE_POLL_MS);
+    }
+
     async function ativarUsuarioNuvem(user) {
         currentUser = user;
         mostrarCloudLogado(user);
         setCloudStatus('Sincronizando...', 'syncing');
-        setCloudMessage('Verificando os dados locais e da nuvem...');
+        setCloudMessage('Conferindo primeiro a versão mais recente da nuvem...');
 
         const remote = await buscarCloudRow();
         if (remote.error) {
-            tratarErroTabela(remote.error);
+            salvarCloudMeta({ pendingSync: temPendenciasCloud(), userId: currentUser.id });
+            tratarErroTabela(remote.error, temPendenciasCloud());
             iniciarObservacaoLocal();
+            iniciarObservacaoRemota();
             return;
         }
 
         const remoteGastos = remote.data?.data ? normalizarPayloadCloud(remote.data.data) : [];
         const temRemote = Boolean(remote.data?.data);
         const meta = lerCloudMeta();
+        const pendencias = lerPendenciasCloud();
+        const temPendencias = temPendenciasCloud(pendencias);
+        const remotoEm = temRemote ? (remoteDataUpdatedAt(remote.data) || remote.data.updated_at || new Date().toISOString()) : null;
+        const remotoMs = Date.parse(remotoEm || '') || 0;
+        const baselineMs = Date.parse(meta.lastSyncedDataUpdatedAt || '') || 0;
+        const localMs = Date.parse(meta.updatedAt || '') || 0;
 
-        if (temRemote && temDadosLocais() && !meta.lastSyncedAt) {
+        if (temRemote && temDadosLocais() && listasIguais(listaGastos, remoteGastos)) {
+            marcarSincronizado(remotoEm);
+        } else if (temRemote && temPendencias) {
+            const mesclados = aplicarPendenciasCloud(remoteGastos, pendencias);
+            aplicarListaLocal(mesclados);
+            const agora = new Date().toISOString();
+            salvarCloudMeta({
+                updatedAt: agora,
+                lastSyncedDataUpdatedAt: remotoEm,
+                pendingSync: true,
+                userId: currentUser.id
+            });
+            setCloudMessage('Encontrei alterações deste aparelho e da nuvem. Mesclei por lançamento e estou confirmando no servidor.');
+            await pushCloud(true);
+        } else if (temRemote && temDadosLocais() && !meta.lastSyncedAt) {
             const usarLocal = confirm(
                 'Existem dados neste aparelho e também na nuvem.\n\n' +
                 'OK = manter os dados DESTE APARELHO e enviar para a nuvem.\n' +
                 'Cancelar = usar os dados DA NUVEM neste aparelho.'
             );
-            if (usarLocal) await pushCloud(true);
-            else aplicarCloudLocal(remoteGastos, remote.data.updated_at);
+            if (usarLocal) {
+                const agora = new Date().toISOString();
+                salvarCloudMeta({ updatedAt: agora, pendingSync: true, userId: currentUser.id });
+                registrarPendenciasCloud(JSON.stringify(remoteGastos), localStorage.getItem(STORAGE_KEY) || '[]');
+                await pushCloud(true);
+            } else {
+                aplicarCloudLocal(remoteGastos, remotoEm);
+            }
         } else if (temRemote && !temDadosLocais()) {
-            aplicarCloudLocal(remoteGastos, remote.data.updated_at);
+            aplicarCloudLocal(remoteGastos, remotoEm);
         } else if (!temRemote) {
+            const agora = new Date().toISOString();
+            salvarCloudMeta({ updatedAt: meta.updatedAt || agora, pendingSync: true, userId: currentUser.id });
+            if (!temPendenciasCloud()) registrarPendenciasCloud('[]', localStorage.getItem(STORAGE_KEY) || '[]');
             await pushCloud(true);
         } else if (temRemote) {
-            const localUpdated = Date.parse(meta.updatedAt || '') || 0;
-            const remoteUpdated = Date.parse(remote.data.updated_at || '') || 0;
-            if (localUpdated > remoteUpdated) await pushCloud(true);
-            else if (remoteUpdated > localUpdated) aplicarCloudLocal(remoteGastos, remote.data.updated_at);
-            else setCloudStatus('Sincronizado', 'synced');
+            if (baselineMs && remotoMs > baselineMs) {
+                aplicarCloudLocal(remoteGastos, remotoEm);
+            } else if (!baselineMs && remotoMs > localMs) {
+                aplicarCloudLocal(remoteGastos, remotoEm);
+            } else if (localMs > remotoMs) {
+                salvarCloudMeta({ pendingSync: true, userId: currentUser.id });
+                registrarPendenciasCloud(JSON.stringify(remoteGastos), localStorage.getItem(STORAGE_KEY) || '[]');
+                await pushCloud(true);
+            } else {
+                aplicarCloudLocal(remoteGastos, remotoEm);
+            }
         }
 
         iniciarObservacaoLocal();
-        setCloudMessage('Dados familiares sincronizados em uma área separada do Meu Financeiro.');
+        iniciarObservacaoRemota();
+        if (!lerCloudMeta().pendingSync) {
+            setCloudMessage('Dados conferidos com a nuvem. Você pode continuar neste aparelho.');
+        }
     }
 
     function desativarUsuarioNuvem() {
         currentUser = null;
         clearTimeout(saveTimer);
+        clearTimeout(retryTimer);
         clearInterval(pollTimer);
+        clearInterval(remoteTimer);
         pollTimer = null;
+        remoteTimer = null;
         mostrarCloudDeslogado();
     }
 
@@ -292,56 +536,112 @@
     }
 
     async function pushCloud(force = false) {
-        if (!client || !currentUser || syncing) return;
+        if (!client || !currentUser || syncing) return false;
+        prepararMudancaLocalNaoObservada();
+
+        let meta = lerCloudMeta();
+        let pendencias = lerPendenciasCloud();
+        let temPendencias = temPendenciasCloud(pendencias);
+        if (!force && !meta.pendingSync && !temPendencias) return true;
+
         if (!navigator.onLine) {
-            setCloudStatus('Sem internet', 'offline');
-            return;
-        }
-        if (!force) {
-            const raw = localStorage.getItem(STORAGE_KEY) || '[]';
-            if (raw === lastObservedLocal) return;
+            salvarCloudMeta({ pendingSync: true, userId: currentUser.id });
+            setCloudStatus('Salvo neste aparelho', 'offline');
+            setCloudMessage('Há alterações pendentes. Elas continuam guardadas e serão enviadas quando a internet voltar.');
+            return false;
         }
 
         syncing = true;
-        setCloudStatus('Salvando...', 'syncing');
+        setCloudStatus('Conferindo nuvem...', 'syncing');
         try {
-            const { error } = await client
+            const remote = await buscarCloudRow();
+            if (remote.error) throw remote.error;
+
+            const temRemote = Boolean(remote.data?.data);
+            const remoteGastos = temRemote ? normalizarPayloadCloud(remote.data.data) : [];
+            const remotoEm = temRemote ? (remoteDataUpdatedAt(remote.data) || remote.data.updated_at || null) : null;
+            const remotoMs = Date.parse(remotoEm || '') || 0;
+            meta = lerCloudMeta();
+            const baselineMs = Date.parse(meta.lastSyncedDataUpdatedAt || '') || 0;
+            pendencias = lerPendenciasCloud();
+            temPendencias = temPendenciasCloud(pendencias);
+
+            if (temRemote && temPendencias && (!baselineMs || remotoMs > baselineMs)) {
+                const mesclados = aplicarPendenciasCloud(remoteGastos, pendencias);
+                if (!listasIguais(listaGastos, mesclados)) aplicarListaLocal(mesclados);
+                const agoraMescla = new Date().toISOString();
+                salvarCloudMeta({
+                    updatedAt: agoraMescla,
+                    lastSyncedDataUpdatedAt: remotoEm,
+                    pendingSync: true,
+                    userId: currentUser.id
+                });
+                setCloudMessage('A nuvem mudou desde o último uso deste aparelho. Preservei suas alterações locais e mesclei os lançamentos antes de salvar.');
+            } else if (temRemote && !temPendencias && !meta.pendingSync) {
+                if (!listasIguais(listaGastos, remoteGastos)) {
+                    aplicarCloudLocal(remoteGastos, remotoEm);
+                } else {
+                    marcarSincronizado(remotoEm);
+                }
+                return true;
+            } else if (temRemote && !temPendencias && meta.pendingSync) {
+                if (!listasIguais(listaGastos, remoteGastos) && remotoMs > baselineMs) {
+                    aplicarCloudLocal(remoteGastos, remotoEm);
+                    return true;
+                }
+            }
+
+            meta = lerCloudMeta();
+            pendencias = lerPendenciasCloud();
+            temPendencias = temPendenciasCloud(pendencias);
+            if (!temPendencias && !meta.pendingSync && temRemote && listasIguais(listaGastos, remoteGastos)) {
+                marcarSincronizado(remotoEm);
+                return true;
+            }
+
+            const dataUpdatedAt = new Date().toISOString();
+            salvarCloudMeta({ updatedAt: dataUpdatedAt, pendingSync: true, userId: currentUser.id });
+            setCloudStatus('Salvando...', 'syncing');
+
+            const { data: salvo, error } = await client
                 .from(FAMILY_CLOUD_TABLE)
-                .upsert({ user_id: currentUser.id, data: payloadLocal() }, { onConflict: 'user_id' });
+                .upsert({
+                    user_id: currentUser.id,
+                    data: payloadLocal(dataUpdatedAt)
+                }, { onConflict: 'user_id' })
+                .select('data, updated_at')
+                .single();
             if (error) throw error;
-            const agora = new Date().toISOString();
+
+            const confirmadoEm = salvo?.data && !Array.isArray(salvo.data)
+                ? salvo.data.dataUpdatedAt
+                : null;
+            if (confirmadoEm !== dataUpdatedAt) {
+                throw new Error('O servidor não confirmou a versão enviada.');
+            }
+
             lastObservedLocal = localStorage.getItem(STORAGE_KEY) || '[]';
-            salvarCloudMeta({ updatedAt: agora, lastSyncedAt: agora, userId: currentUser.id });
-            setCloudStatus('Sincronizado', 'synced');
+            marcarSincronizado(dataUpdatedAt);
+            clearTimeout(retryTimer);
+            setCloudMessage('Dados confirmados na nuvem. Celular e notebook podem continuar a partir desta versão.');
+            return true;
         } catch (error) {
-            tratarErroTabela(error);
+            salvarCloudMeta({ pendingSync: true, userId: currentUser?.id || null });
+            tratarErroTabela(error, true);
+            agendarRetry();
+            return false;
         } finally {
             syncing = false;
         }
     }
 
-    function aplicarCloudLocal(gastos, remoteUpdatedAt) {
-        listaGastos = gastos.map(normalizarGasto);
-        salvarLocal();
-        lastObservedLocal = localStorage.getItem(STORAGE_KEY) || '[]';
-        salvarCloudMeta({
-            updatedAt: remoteUpdatedAt || new Date().toISOString(),
-            lastSyncedAt: new Date().toISOString(),
-            userId: currentUser?.id || null
-        });
-        popularSelects();
-        popularFiltroAnos();
-        popularFiltroCompetencias();
-        carregarTabela();
-        renderAvisoLegado();
-        setCloudStatus('Sincronizado', 'synced');
-    }
-
-    function tratarErroTabela(error) {
+    function tratarErroTabela(error, pendente = false) {
         console.error('Erro na nuvem familiar:', error);
         const texto = friendlyCloudError(error);
-        setCloudStatus('Nuvem indisponível', 'error');
-        setCloudMessage(`${texto} Seus dados locais continuam preservados.`);
+        setCloudStatus(pendente ? 'Pendente' : 'Nuvem indisponível', pendente ? 'syncing' : 'error');
+        setCloudMessage(pendente
+            ? `${texto} A alteração continua salva neste aparelho e uma nova tentativa será feita automaticamente.`
+            : `${texto} Seus dados locais continuam preservados.`);
     }
 
     function iniciarObservacaoLocal() {
@@ -350,33 +650,43 @@
         pollTimer = setInterval(() => {
             const atual = localStorage.getItem(STORAGE_KEY) || '[]';
             if (atual === lastObservedLocal) return;
+
+            const alteradoEm = registrarPendenciasCloud(lastObservedLocal, atual) || new Date().toISOString();
             lastObservedLocal = atual;
-            salvarCloudMeta({ updatedAt: new Date().toISOString(), userId: currentUser?.id || null });
+            salvarCloudMeta({
+                updatedAt: alteradoEm,
+                pendingSync: true,
+                userId: currentUser?.id || null
+            });
+
+            if (!navigator.onLine) {
+                setCloudStatus('Salvo neste aparelho', 'offline');
+                setCloudMessage('Alteração guardada neste aparelho. Ela continuará pendente até a nuvem confirmar o recebimento.');
+                return;
+            }
+
+            setCloudStatus('Pendente', 'syncing');
+            setCloudMessage('Alteração salva neste aparelho. Confirmando na nuvem...');
             clearTimeout(saveTimer);
             saveTimer = setTimeout(() => pushCloud(true), 700);
         }, 1000);
     }
 
     async function sincronizarAgora(mostrarMensagem) {
-        if (!currentUser) return;
+        if (!currentUser) return false;
         if (!navigator.onLine) {
+            salvarCloudMeta({ pendingSync: temPendenciasCloud() || Boolean(lerCloudMeta().pendingSync), userId: currentUser.id });
             setCloudStatus('Sem internet', 'offline');
-            if (mostrarMensagem) setCloudMessage('Sem internet. Os dados continuam salvos localmente.');
-            return;
+            if (mostrarMensagem) setCloudMessage('Sem internet. Os dados continuam salvos localmente e a sincronização permanece pendente.');
+            return false;
         }
 
-        const remote = await buscarCloudRow();
-        if (remote.error) return tratarErroTabela(remote.error);
-        if (!remote.data?.data) {
-            await pushCloud(true);
-            return;
+        const ok = await pushCloud(true);
+        if (mostrarMensagem) {
+            setCloudMessage(ok
+                ? 'Sincronização concluída e confirmada pelo servidor.'
+                : 'A sincronização ainda está pendente. O sistema tentará novamente automaticamente.');
         }
-
-        const meta = lerCloudMeta();
-        const localUpdated = Date.parse(meta.updatedAt || '') || 0;
-        const remoteUpdated = Date.parse(remote.data.updated_at || '') || 0;
-        if (remoteUpdated > localUpdated) aplicarCloudLocal(normalizarPayloadCloud(remote.data.data), remote.data.updated_at);
-        else await pushCloud(true);
-        if (mostrarMensagem) setCloudMessage('Sincronização concluída.');
+        return ok;
     }
 })();
