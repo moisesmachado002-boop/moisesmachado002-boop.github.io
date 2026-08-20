@@ -1,0 +1,9 @@
+/* v2.8.9 - nome amigável para o arquivo de backup.
+   Apenas altera o nome do arquivo baixado. O conteúdo do backup permanece igual. */
+
+nomeBackupHoje = function() {
+    const iso = typeof dataLocalISO === 'function' ? dataLocalISO() : '';
+    const [ano = '', mes = '', dia = ''] = String(iso).split('-');
+    const dataArquivo = ano && mes && dia ? `${dia}-${mes}-${ano}` : String(iso || 'backup');
+    return `Relatório do Controle Familiar - ${dataArquivo}.json`;
+};
