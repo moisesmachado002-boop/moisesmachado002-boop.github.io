@@ -1,7 +1,7 @@
 /* v2.12.3 - trava contra sobrescrita destrutiva da nuvem.
-   Antes de qualquer gravação do pacote de lançamentos, consulta a versão remota e
-   preserva registros que desapareceram localmente sem uma exclusão explícita na fila.
-   Exclusões normais continuam funcionando porque seus IDs constam em `deletes`. */
+   Antes de qualquer gravação do pacote de lançamentos, consulta a versão remota.
+   Preserva ausências sem exclusão explícita e BLOQUEIA reduções bruscas da base,
+   mesmo quando uma fila local defeituosa marcar muitos IDs como excluídos. */
 (() => {
     const core = window.familyCore;
     const originalFetch = window.fetch.bind(window);
@@ -56,6 +56,15 @@
         return Array.isArray(rows) && rows.length ? rows[0]?.data : null;
     }
 
+    function reducaoEmMassaSuspeita(gastosRemotos, gastosLocais) {
+        const remoto = gastosRemotos.length;
+        const local = gastosLocais.length;
+        if (remoto < 20 || local >= remoto) return false;
+        const ausentes = remoto - local;
+        const limiteAusentes = Math.max(10, Math.ceil(remoto * 0.20));
+        return local < Math.floor(remoto * 0.80) && ausentes >= limiteAusentes;
+    }
+
     async function safeFetch(input, init) {
         const request = input instanceof Request ? input : new Request(input, init);
         if (!['POST', 'PATCH', 'PUT'].includes(request.method.toUpperCase())) {
@@ -80,6 +89,16 @@
             const gastosLocais = gastosDoPayload(payload?.data);
             const deletes = lerDeletesExplicitos();
             const idsLocais = new Set(gastosLocais.map(g => String(g?.id || '')).filter(Boolean));
+
+            // Esta é a proteção que impede uma cópia local vazia/pequena de substituir
+            // centenas de lançamentos por causa de uma fila ou estado local corrompido.
+            if (reducaoEmMassaSuspeita(gastosRemotos, gastosLocais)) {
+                const ausentes = gastosRemotos.length - gastosLocais.length;
+                throw new Error(
+                    `Redução em massa bloqueada: a gravação removeria ${ausentes} de ` +
+                    `${gastosRemotos.length} lançamentos de uma só vez.`
+                );
+            }
 
             const preservar = gastosRemotos.filter(g => {
                 const id = String(g?.id || '');
@@ -110,7 +129,7 @@
         } catch (error) {
             console.error('Proteção da nuvem bloqueou uma gravação não verificada:', error);
             return new Response(JSON.stringify({
-                message: 'Gravação bloqueada por segurança: não foi possível conferir os lançamentos remotos.'
+                message: String(error?.message || 'Gravação bloqueada por segurança.')
             }), {
                 status: 503,
                 headers: { 'content-type': 'application/json' }
@@ -122,7 +141,8 @@
     window.__familyCloudWriteGuard = {
         version: '2.12.3',
         active: true,
-        pendingKey: PENDING_KEY
+        pendingKey: PENDING_KEY,
+        massDeletionGuard: true
     };
     core?.registerModule?.('cloud-write-guard', { area: 'nuvem', version: '2.12.3' });
 })();
