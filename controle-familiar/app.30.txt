@@ -1,0 +1,150 @@
+/* v2.12.2 - competência automática da fatura pelo dia de fechamento do cartão.
+   Regra: compra até o dia do fechamento fica na competência do mês da compra;
+   compra após o fechamento vai para a competência seguinte.
+   A competência pode continuar sendo corrigida manualmente no formulário. */
+(() => {
+    const core = window.familyCore;
+    const campoData = document.getElementById('data');
+    const campoCartao = document.getElementById('cartao');
+    const campoMes = document.getElementById('mesFatura');
+    const campoAno = document.getElementById('anoFatura');
+    if (!core?.on || !campoData || !campoCartao || !campoMes || !campoAno) return;
+
+    let atualizacaoInterna = false;
+    let ajusteManual = false;
+    let emEdicao = false;
+
+    function partesDataCompra(valor) {
+        const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(valor || ''));
+        if (!match) return null;
+        const ano = Number(match[1]);
+        const mes = Number(match[2]);
+        const dia = Number(match[3]);
+        if (!Number.isInteger(ano) || ano < 2000 || ano > 2100) return null;
+        if (!Number.isInteger(mes) || mes < 1 || mes > 12) return null;
+        if (!Number.isInteger(dia) || dia < 1 || dia > 31) return null;
+        return { ano, mes, dia };
+    }
+
+    function fechamentoDoCartao(cartao) {
+        if (!String(cartao || '').trim()) return null;
+        try {
+            if (typeof familyCardSettingsFor === 'function') {
+                const settings = familyCardSettingsFor(cartao);
+                const dia = Number(settings?.closingDay);
+                return Number.isInteger(dia) && dia >= 1 && dia <= 31 ? dia : null;
+            }
+        } catch {}
+        return null;
+    }
+
+    function competenciaDaCompra(dataIso, fechamento) {
+        const partes = partesDataCompra(dataIso);
+        const diaFechamento = Number(fechamento);
+        if (!partes || !Number.isInteger(diaFechamento) || diaFechamento < 1 || diaFechamento > 31) return '';
+
+        const base = `${partes.ano}-${String(partes.mes).padStart(2, '0')}`;
+        return partes.dia > diaFechamento
+            ? adicionarMesesCompetencia(base, 1)
+            : base;
+    }
+
+    function limparMarcacaoAutomatica() {
+        delete campoMes.dataset.competenciaAutomatica;
+        delete campoAno.dataset.competenciaAutomatica;
+        campoMes.removeAttribute('title');
+        campoAno.removeAttribute('title');
+    }
+
+    function aplicarCompetenciaAutomatica({ forcar = false } = {}) {
+        if (ajusteManual && !forcar) return '';
+
+        const cartao = String(campoCartao.value || '').trim();
+        const fechamento = fechamentoDoCartao(cartao);
+        const competencia = competenciaDaCompra(campoData.value, fechamento);
+        if (!competencia) {
+            limparMarcacaoAutomatica();
+            return '';
+        }
+
+        const [ano, mes] = competencia.split('-');
+        atualizacaoInterna = true;
+        try {
+            campoMes.value = mes;
+            campoAno.value = ano;
+            campoMes.dataset.competenciaAutomatica = '1';
+            campoAno.dataset.competenciaAutomatica = '1';
+            const texto = `Fatura definida automaticamente: ${formatarCompetencia(competencia)} · cartão fecha dia ${String(fechamento).padStart(2, '0')}`;
+            campoMes.title = texto;
+            campoAno.title = texto;
+        } finally {
+            atualizacaoInterna = false;
+        }
+
+        core.emit?.('invoice:competence-auto-selected', {
+            competencia,
+            cartao,
+            dataCompra: campoData.value,
+            closingDay: fechamento
+        });
+        return competencia;
+    }
+
+    function contextoDaCompraMudou() {
+        // Se data ou cartão mudaram, existe um novo contexto e a sugestão automática é recalculada.
+        ajusteManual = false;
+        aplicarCompetenciaAutomatica({ forcar: true });
+    }
+
+    function marcarAjusteManual() {
+        if (atualizacaoInterna) return;
+        ajusteManual = true;
+        limparMarcacaoAutomatica();
+    }
+
+    campoData.addEventListener('change', contextoDaCompraMudou);
+    campoCartao.addEventListener('change', contextoDaCompraMudou);
+    campoMes.addEventListener('change', marcarAjusteManual);
+    campoAno.addEventListener('change', marcarAjusteManual);
+
+    core.on('expense:edit-prepared', () => {
+        // Abrir uma edição nunca muda sozinho a competência já gravada.
+        emEdicao = true;
+        ajusteManual = false;
+        limparMarcacaoAutomatica();
+    });
+
+    core.on('expense:form-cleared', () => {
+        emEdicao = false;
+        ajusteManual = false;
+        setTimeout(() => aplicarCompetenciaAutomatica({ forcar: true }), 0);
+    });
+
+    core.on('cards:synced', () => {
+        if (!emEdicao && !ajusteManual) aplicarCompetenciaAutomatica({ forcar: true });
+    });
+
+    window.__familyInvoiceAutoCompetence = {
+        calculate: competenciaDaCompra,
+        apply: () => aplicarCompetenciaAutomatica({ forcar: true }),
+        closingDay: fechamentoDoCartao
+    };
+
+    const testeRapido = [
+        ['2026-08-05', 6, '2026-08'],
+        ['2026-08-06', 6, '2026-08'],
+        ['2026-08-08', 6, '2026-09'],
+        ['2026-12-08', 6, '2027-01']
+    ].every(([data, fechamento, esperado]) => competenciaDaCompra(data, fechamento) === esperado);
+
+    if (!testeRapido) {
+        console.warn('Competência automática: autoteste da regra de fechamento não passou.');
+    }
+
+    // Novo lançamento aberto no formulário já recebe a competência adequada ao cartão atual.
+    if (!document.getElementById('editId')?.value) {
+        aplicarCompetenciaAutomatica({ forcar: true });
+    }
+
+    core.registerModule?.('invoice-auto-competence', { area: 'faturas', version: '2.12.2' });
+})();
