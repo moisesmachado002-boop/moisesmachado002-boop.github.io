@@ -1,0 +1,128 @@
+/* v2.12.3 - trava contra sobrescrita destrutiva da nuvem.
+   Antes de qualquer gravação do pacote de lançamentos, consulta a versão remota e
+   preserva registros que desapareceram localmente sem uma exclusão explícita na fila.
+   Exclusões normais continuam funcionando porque seus IDs constam em `deletes`. */
+(() => {
+    const core = window.familyCore;
+    const originalFetch = window.fetch.bind(window);
+    const FAMILY_TABLE_PATH = '/rest/v1/family_finance_state';
+    const PENDING_KEY = 'family-finance-cloud-pending-v2';
+
+    function lerDeletesExplicitos() {
+        try {
+            const raw = JSON.parse(localStorage.getItem(PENDING_KEY) || '{}');
+            return new Set(Array.isArray(raw?.deletes) ? raw.deletes.map(String) : []);
+        } catch {
+            return new Set();
+        }
+    }
+
+    function gastosDoPayload(data) {
+        if (Array.isArray(data)) return data;
+        return data && Array.isArray(data.gastos) ? data.gastos : [];
+    }
+
+    function ehGravacaoDeLancamentos(request, body) {
+        try {
+            const url = new URL(request.url, location.href);
+            if (!url.pathname.endsWith(FAMILY_TABLE_PATH)) return false;
+            if (!['POST', 'PATCH', 'PUT'].includes(request.method.toUpperCase())) return false;
+            const payload = Array.isArray(body) ? body[0] : body;
+            return Boolean(payload?.data && Array.isArray(payload.data.gastos));
+        } catch {
+            return false;
+        }
+    }
+
+    async function buscarPacoteRemoto(request, userId) {
+        const url = new URL(request.url, location.href);
+        url.search = '';
+        url.searchParams.set('select', 'data');
+        if (userId) url.searchParams.set('user_id', `eq.${userId}`);
+        url.searchParams.set('limit', '1');
+
+        const headers = new Headers(request.headers);
+        headers.delete('content-type');
+        headers.delete('content-length');
+        headers.delete('prefer');
+
+        const response = await originalFetch(url.toString(), {
+            method: 'GET',
+            headers,
+            cache: 'no-store'
+        });
+        if (!response.ok) throw new Error(`Falha ao conferir a nuvem antes de salvar (${response.status}).`);
+        const rows = await response.json();
+        return Array.isArray(rows) && rows.length ? rows[0]?.data : null;
+    }
+
+    async function safeFetch(input, init) {
+        const request = input instanceof Request ? input : new Request(input, init);
+        if (!['POST', 'PATCH', 'PUT'].includes(request.method.toUpperCase())) {
+            return originalFetch(input, init);
+        }
+
+        let body;
+        try {
+            body = JSON.parse(await request.clone().text());
+        } catch {
+            return originalFetch(input, init);
+        }
+
+        if (!ehGravacaoDeLancamentos(request, body)) {
+            return originalFetch(input, init);
+        }
+
+        try {
+            const payload = Array.isArray(body) ? body[0] : body;
+            const remoto = await buscarPacoteRemoto(request, payload?.user_id);
+            const gastosRemotos = gastosDoPayload(remoto);
+            const gastosLocais = gastosDoPayload(payload?.data);
+            const deletes = lerDeletesExplicitos();
+            const idsLocais = new Set(gastosLocais.map(g => String(g?.id || '')).filter(Boolean));
+
+            const preservar = gastosRemotos.filter(g => {
+                const id = String(g?.id || '');
+                return id && !idsLocais.has(id) && !deletes.has(id);
+            });
+
+            if (preservar.length) {
+                payload.data.gastos = [...preservar, ...gastosLocais];
+                payload.data.version = '2.12.3';
+                payload.data.safetyMerge = {
+                    preservedRemoteRecords: preservar.length,
+                    at: new Date().toISOString()
+                };
+                console.warn(
+                    `Proteção da nuvem: ${preservar.length} lançamento(s) remoto(s) foram preservados ` +
+                    'porque não havia exclusão explícita para eles.'
+                );
+            }
+
+            const nextBody = Array.isArray(body) ? [payload, ...body.slice(1)] : payload;
+            const headers = new Headers(request.headers);
+            headers.set('content-type', 'application/json');
+            const guardedRequest = new Request(request, {
+                headers,
+                body: JSON.stringify(nextBody)
+            });
+            return originalFetch(guardedRequest);
+        } catch (error) {
+            console.error('Proteção da nuvem bloqueou uma gravação não verificada:', error);
+            return new Response(JSON.stringify({
+                message: 'Gravação bloqueada por segurança: não foi possível conferir os lançamentos remotos.'
+            }), {
+                status: 503,
+                headers: { 'content-type': 'application/json' }
+            });
+        }
+    }
+
+    window.fetch = safeFetch;
+    window.__familyCloudWriteGuard = {
+        version: '2.12.3',
+        active: true,
+        pendingKey: PENDING_KEY
+    };
+    core?.registerModule?.('cloud-write-guard', { area: 'nuvem', version: '2.12.3' });
+})();
