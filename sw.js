@@ -1,4 +1,4 @@
-const CACHE = 'meu-financeiro-v1-5-3';
+const CACHE = 'meu-financeiro-v1-5-4';
 const CACHE_PREFIX = 'meu-financeiro-';
 const SCOPE_URL = new URL(self.registration.scope);
 const SCOPE_PATH = SCOPE_URL.pathname;
@@ -6,8 +6,8 @@ const SCOPE_PATH = SCOPE_URL.pathname;
 const STATIC_ASSETS = [
   './index.html',
   './financeiro.html',
-  './manifest.json?v=1.5.2',
-  './manifest-app.json',
+  './manifest.json?v=1.5.4',
+  './manifest-app.json?v=1.5.4',
   './icon.svg',
   './loader.js?v=1.5.2',
   './loader-app.js',
@@ -52,13 +52,12 @@ self.addEventListener('fetch', event => {
   const url = new URL(event.request.url);
   const relative = relativeRootPath(url);
 
-  // Não interfere em /controle-familiar/ nem em qualquer outra subpasta do site.
+  // Não interfere em /SIMULADO-01/, /controle-familiar/ ou qualquer outra subpasta.
   if (relative === null) return;
 
   const isNavigation = event.request.mode === 'navigate';
 
   if (isNavigation) {
-    // O Meu Financeiro só possui estas navegações na raiz.
     if (relative !== '' && relative !== 'index.html' && relative !== 'financeiro.html') return;
 
     const fallbackUrl = navigationFallback(relative);
