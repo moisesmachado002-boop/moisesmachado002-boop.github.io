@@ -4,7 +4,7 @@
   "short_name": "Financeiro",
   "description": "Controle financeiro pessoal com sincronização na nuvem.",
   "start_url": "./financeiro.html",
-  "scope": "./",
+  "scope": "./financeiro.html",
   "display": "standalone",
   "background_color": "#0b1120",
   "theme_color": "#0f172a",
