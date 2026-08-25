@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#0b1020">
+  <title>Corrigindo acesso à Mentor IA</title>
+  <style>
+    body{margin:0;min-height:100vh;display:grid;place-items:center;background:#0b1020;color:#f8fafc;font-family:system-ui,sans-serif;padding:24px}
+    main{max-width:520px;text-align:center;background:#121a2d;border:1px solid #27324b;border-radius:24px;padding:28px}
+    h1{margin:0 0 10px;font-size:24px}p{color:#cbd5e1;line-height:1.55}.status{margin-top:18px;color:#a78bfa;font-weight:700}
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Separando os aplicativos…</h1>
+    <p>Removendo o service worker antigo do Meu Financeiro e limpando somente os caches estáticos dele. Seus dados financeiros não são apagados.</p>
+    <div class="status" id="status">Iniciando correção…</div>
+  </main>
+  <script>
+    (async () => {
+      const status = document.getElementById('status');
+      try {
+        if ('serviceWorker' in navigator) {
+          status.textContent = 'Removendo controle antigo…';
+          const regs = await navigator.serviceWorker.getRegistrations();
+          for (const reg of regs) {
+            const scope = new URL(reg.scope).pathname;
+            if (scope === '/') await reg.unregister();
+          }
+        }
+        if ('caches' in window) {
+          status.textContent = 'Limpando cache antigo…';
+          const keys = await caches.keys();
+          await Promise.all(keys.filter(k => k.startsWith('meu-financeiro-')).map(k => caches.delete(k)));
+        }
+        status.textContent = 'Abrindo Mentor IA atualizada…';
+        setTimeout(() => location.replace('/SIMULADO-01/?fresh=132'), 500);
+      } catch (e) {
+        status.textContent = 'Correção aplicada parcialmente. Toque para continuar.';
+        document.body.addEventListener('click', () => location.replace('/SIMULADO-01/?fresh=132'), { once:true });
+      }
+    })();
+  </script>
+</body>
+</html>
