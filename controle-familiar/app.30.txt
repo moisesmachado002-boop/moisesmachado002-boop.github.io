@@ -1,4 +1,4 @@
-/* v2.12.2 - competência automática da fatura pelo dia de fechamento do cartão.
+/* v2.12.4 - competência automática da fatura pelo dia de fechamento do cartão.
    Regra: compra até o dia do fechamento fica na competência do mês da compra;
    compra após o fechamento vai para a competência seguinte.
    A competência pode continuar sendo corrigida manualmente no formulário. */
@@ -91,7 +91,16 @@
     }
 
     function contextoDaCompraMudou() {
-        // Se data ou cartão mudaram, existe um novo contexto e a sugestão automática é recalculada.
+        // Durante a edição, data e cartão podem ser corrigidos sem deslocar a
+        // parcela para outra fatura. A competência gravada só muda se o usuário
+        // alterar explicitamente os campos Mês/Ano da fatura.
+        if (emEdicao) {
+            ajusteManual = true;
+            limparMarcacaoAutomatica();
+            return;
+        }
+
+        // Em lançamento novo, data ou cartão definem normalmente a competência.
         ajusteManual = false;
         aplicarCompetenciaAutomatica({ forcar: true });
     }
@@ -146,5 +155,5 @@
         aplicarCompetenciaAutomatica({ forcar: true });
     }
 
-    core.registerModule?.('invoice-auto-competence', { area: 'faturas', version: '2.12.2' });
+    core.registerModule?.('invoice-auto-competence', { area: 'faturas', version: '2.12.4' });
 })();
