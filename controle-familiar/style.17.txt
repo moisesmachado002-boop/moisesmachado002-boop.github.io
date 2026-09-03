@@ -1,4 +1,4 @@
-/* v2.13.2 - aba de empréstimos */
+/* v2.14.0 - aba de empréstimos */
 #familyLoansSection{color:#e2e8f0}#familyLoansSection[hidden]{display:none!important}
 .loan-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:14px}.loan-head h3{margin:0;color:#fff}.loan-head p{margin:4px 0 0;color:#94a3b8;font-size:13px}
 .loan-summary{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:14px}.loan-summary>div{padding:14px;border:1px solid rgba(148,163,184,.2);border-radius:14px;background:rgba(15,23,42,.65)}.loan-summary span,.loan-values span{display:block;color:#94a3b8;font-size:11px}.loan-summary strong{display:block;margin-top:4px;color:#fff;font-size:18px}
@@ -8,3 +8,13 @@
 .loan-actions{display:flex;flex-wrap:wrap;gap:7px;margin-top:13px}.loan-actions button{border:1px solid #334155;border-radius:8px;padding:8px 9px;background:#172554;color:#bfdbfe;font-size:11px;font-weight:700;cursor:pointer}.loan-actions button:disabled{opacity:.45;cursor:not-allowed}.loan-actions button.danger{background:rgba(127,29,29,.24);color:#fca5a5}.loan-empty{padding:26px;border:1px dashed #475569;border-radius:14px;text-align:center;color:#94a3b8}
 @media(max-width:720px){.loan-head{align-items:stretch;flex-direction:column}.loan-summary,.loan-list{grid-template-columns:1fr}.loan-form{grid-template-columns:1fr}.loan-notes,.loan-form-actions{grid-column:auto}.loan-summary{grid-template-columns:repeat(3,1fr)}.loan-summary strong{font-size:14px}.loan-values strong{font-size:13px}}
 @media print{#familyLoansSection{display:none!important}}
+
+.loan-person-field{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:7px}.loan-person-field .btn-secondary{white-space:nowrap;padding:9px 11px}
+.loan-summary>.loan-people-summary{grid-column:1/-1;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:9px}
+.loan-person-summary-card{padding:12px;border:1px solid rgba(96,165,250,.24);border-radius:12px;background:rgba(30,41,59,.72)}
+.loan-person-summary-card>strong{display:block;color:#fff;font-size:15px}.loan-person-summary-card>span{display:block;margin:2px 0 8px;color:#94a3b8;font-size:11px}
+.loan-person-summary-card>div{display:flex;flex-wrap:wrap;gap:6px}.loan-person-summary-card b{padding:4px 6px;border-radius:7px;background:rgba(2,8,23,.35);color:#cbd5e1;font-size:10px}
+.loan-list{display:block}.loan-person-group{margin-bottom:18px;padding:14px;border:1px solid rgba(148,163,184,.2);border-radius:16px;background:rgba(2,8,23,.18)}
+.loan-person-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}.loan-person-head h3{margin:0;color:#fff}.loan-person-head span{color:#94a3b8;font-size:12px}
+.loan-person-items{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+@media(max-width:720px){.loan-person-field{grid-template-columns:1fr}.loan-summary>.loan-people-summary,.loan-person-items{grid-template-columns:1fr}}

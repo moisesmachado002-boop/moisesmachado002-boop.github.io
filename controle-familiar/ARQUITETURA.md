@@ -1,6 +1,6 @@
 # Controle Familiar — Arquitetura interna
 
-Versão de referência: **2.13.0**
+Versão de referência: **2.14.0**
 
 Este documento existe para tornar futuras alterações mais previsíveis e reduzir o risco de uma correção em uma área afetar outra.
 
@@ -46,6 +46,7 @@ A tabela familiar continua sendo `family_finance_state`.
 - `invoice_payments`: pagamentos das faturas.
 - `card_settings`: limites e datas dos cartões.
 - `loans`: empréstimos pessoais e histórico de pagamentos.
+- `loan_people`: cadastro de pessoas credoras dos empréstimos.
 
 Cada área deve continuar usando seu próprio marcador temporal interno/específico para não confundir alterações de naturezas diferentes.
 

@@ -1,10 +1,13 @@
-/* v2.13.2 - aba separada de empréstimos pessoais. */
+/* v2.14.0 - aba separada de empréstimos pessoais. */
 (() => {
     const KEY = 'family-finance-loans-v1';
+    const PEOPLE_KEY = 'family-finance-loan-people-v1';
     const TABLE = 'family_finance_state';
     let loans = load();
+    let people = loadPeople();
     let editingId = '';
     let syncing = false;
+    let submitting = false;
 
     const cents = value => Math.max(0, Math.round(Number(value) || 0));
     const money = value => formatarMoeda(cents(value) / 100);
@@ -55,9 +58,61 @@
         catch { return {}; }
     }
 
+    function normalizePeople(raw) {
+        const source = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+        const out = {};
+        Object.entries(source).forEach(([name, entry]) => {
+            const clean = String(name || '').trim();
+            if (!clean) return;
+            out[clean] = { deleted: Boolean(entry?.deleted), updatedAt: String(entry?.updatedAt || new Date(0).toISOString()) };
+        });
+        return out;
+    }
+
+    function loadPeople() {
+        try { return normalizePeople(JSON.parse(localStorage.getItem(PEOPLE_KEY) || '{}')); }
+        catch { return {}; }
+    }
+
+    function mergePeople(a, b) {
+        const local = normalizePeople(a), remote = normalizePeople(b), result = {};
+        new Set([...Object.keys(local), ...Object.keys(remote)]).forEach(name => {
+            const x = local[name], y = remote[name];
+            if (!x) result[name] = y;
+            else if (!y) result[name] = x;
+            else result[name] = (Date.parse(x.updatedAt) || 0) >= (Date.parse(y.updatedAt) || 0) ? x : y;
+        });
+        return result;
+    }
+
+    function activePeople() {
+        const names = [...Object.entries(people).filter(([, entry]) => !entry.deleted).map(([name]) => name), ...Object.values(loans).filter(x => !x.deleted && x.person).map(x => x.person)];
+        return [...new Set(names)].sort((a, b) => a.localeCompare(b));
+    }
+
+    function populatePeople(selected = '') {
+        const select = document.getElementById('loanPerson');
+        if (!select) return;
+        const names = activePeople();
+        select.innerHTML = '<option value="">Selecione a pessoa</option>' + names.map(name => `<option value="${escapeHTML(name)}">${escapeHTML(name)}</option>`).join('');
+        if (selected && names.includes(selected)) select.value = selected;
+    }
+
+    function managePeople() {
+        const name = prompt('Nome da pessoa que emprestou o dinheiro:', '');
+        if (name === null) return;
+        const clean = name.trim();
+        if (!clean) return alert('Informe o nome da pessoa.');
+        people[clean] = { deleted: false, updatedAt: now() };
+        localStorage.setItem(PEOPLE_KEY, JSON.stringify(people));
+        populatePeople(clean);
+        if (navigator.onLine) setTimeout(() => syncCloud(false), 120);
+    }
+
     function save({ sync = true } = {}) {
         loans = normalizeMap(loans);
         localStorage.setItem(KEY, JSON.stringify(loans));
+        localStorage.setItem(PEOPLE_KEY, JSON.stringify(people));
         render();
         if (sync && navigator.onLine) setTimeout(() => syncCloud(false), 120);
     }
@@ -129,13 +184,13 @@
             <div class="loan-summary" id="loanSummary"></div>
             <form id="loanForm" class="loan-form" hidden>
                 <input type="hidden" id="loanEditId">
-                <label><span>Nome da pessoa</span><input id="loanPerson" required placeholder="Quem emprestou"></label>
+                <label><span>Nome da pessoa</span><div class="loan-person-field"><select id="loanPerson" required><option value="">Selecione a pessoa</option></select><button type="button" id="loanManagePeople" class="btn-secondary">Cadastrar pessoa</button></div></label>
                 <label><span>Valor emprestado</span><input id="loanPrincipal" inputmode="decimal" required placeholder="0,00"></label>
                 <label><span>Forma de pagamento</span><select id="loanMode"><option value="free">Pagamento livre</option><option value="installments">Parcelado</option></select></label>
                 <label id="loanCountWrap" hidden><span>Quantidade de parcelas</span><input id="loanCount" type="number" min="1" value="1"></label>
                 <label><span>Primeiro vencimento</span><input id="loanDue" type="date"></label>
                 <label class="loan-notes"><span>Observações</span><textarea id="loanNotes" rows="3" placeholder="Detalhes do acordo"></textarea></label>
-                <div class="loan-form-actions"><button type="button" id="loanCancel" class="btn-secondary">Cancelar</button><button type="submit" class="btn-add">Salvar empréstimo</button></div>
+                <div class="loan-form-actions"><button type="button" id="loanCancel" class="btn-secondary">Cancelar</button><button type="submit" id="loanSave" class="btn-add">Salvar empréstimo</button></div>
             </form>
             <div id="loanList" class="loan-list"></div>`;
         areas.appendChild(section);
@@ -146,6 +201,7 @@
         });
         document.getElementById('loanNew').addEventListener('click', () => openForm());
         document.getElementById('loanCancel').addEventListener('click', closeForm);
+        document.getElementById('loanManagePeople').addEventListener('click', managePeople);
         document.getElementById('loanMode').addEventListener('change', toggleCount);
         document.getElementById('loanForm').addEventListener('submit', submitLoan);
     }
@@ -158,7 +214,7 @@
         editingId = id;
         const item = id ? loans[id] : null;
         document.getElementById('loanEditId').value = id;
-        document.getElementById('loanPerson').value = item?.person || '';
+        populatePeople(item?.person || '');
         document.getElementById('loanPrincipal').value = item ? (item.principalCents / 100).toFixed(2).replace('.', ',') : '';
         document.getElementById('loanMode').value = item?.mode || 'free';
         document.getElementById('loanCount').value = item?.installmentCount || 1;
@@ -176,14 +232,19 @@
 
     function submitLoan(event) {
         event.preventDefault();
+        if (submitting) return;
+        submitting = true;
+        const saveButton = document.getElementById('loanSave');
+        if (saveButton) { saveButton.disabled = true; saveButton.textContent = 'Salvando...'; }
         const person = document.getElementById('loanPerson').value.trim();
         const principalCents = parseMoney(document.getElementById('loanPrincipal').value);
         const mode = document.getElementById('loanMode').value;
         const installmentCount = Math.round(Number(document.getElementById('loanCount').value) || 0);
         const firstDueDate = document.getElementById('loanDue').value;
-        if (!person || !Number.isFinite(principalCents) || principalCents <= 0) return alert('Informe o nome e um valor maior que zero.');
-        if (mode === 'installments' && installmentCount < 1) return alert('Informe a quantidade de parcelas.');
-        if (firstDueDate && !validDate(firstDueDate)) return alert('Informe um vencimento válido.');
+        const unlock = message => { submitting = false; if (saveButton) { saveButton.disabled = false; saveButton.textContent = 'Salvar empréstimo'; } if (message) alert(message); };
+        if (!person || !Number.isFinite(principalCents) || principalCents <= 0) return unlock('Selecione a pessoa e informe um valor maior que zero.');
+        if (mode === 'installments' && installmentCount < 1) return unlock('Informe a quantidade de parcelas.');
+        if (firstDueDate && !validDate(firstDueDate)) return unlock('Informe um vencimento válido.');
         const id = editingId || uid();
         loans[id] = normalizeLoan({
             ...(loans[id] || {}), id, person, principalCents, mode,
@@ -193,6 +254,7 @@
         });
         save();
         closeForm();
+        setTimeout(() => unlock(''), 500);
     }
 
     function addPayment(id) {
@@ -227,47 +289,55 @@
         save();
     }
 
+    function renderLoanCard(item) {
+        const paidCents = totalPaid(item), remainingCents = balance(item), due = nextDue(item);
+        const modeLabel = item.mode === 'installments' ? `${item.installmentCount} parcela(s)` : 'Pagamento livre';
+        const payments = [...item.payments].sort((a,b) => b.date.localeCompare(a.date)).map(p => `<li><span>${formatarData(p.date)}${p.note ? ` · ${escapeHTML(p.note)}` : ''}</span><strong>${money(p.amountCents)}</strong><button type="button" onclick="familyLoanRemovePayment('${item.id}','${p.id}')">×</button></li>`).join('');
+        return `<article class="loan-card ${remainingCents === 0 ? 'paid' : ''}">
+            <div class="loan-card-head"><div><h4>${escapeHTML(item.notes || 'Empréstimo')}</h4><span>${escapeHTML(modeLabel)}</span></div><span class="loan-status">${remainingCents === 0 ? 'Quitado' : 'Em aberto'}</span></div>
+            <div class="loan-values"><div><span>Valor</span><strong>${money(item.principalCents)}</strong></div><div><span>Pago</span><strong>${money(paidCents)}</strong></div><div><span>Falta</span><strong>${money(remainingCents)}</strong></div></div>
+            ${due ? `<div class="loan-due">Próximo vencimento: <strong>${formatarData(due)}</strong></div>` : ''}
+            <details class="loan-payments"><summary>Pagamentos (${item.payments.length})</summary>${payments ? `<ul>${payments}</ul>` : '<p>Nenhum pagamento registrado.</p>'}</details>
+            <div class="loan-actions"><button type="button" onclick="familyLoanPay('${item.id}')" ${remainingCents === 0 ? 'disabled' : ''}>Registrar pagamento</button><button type="button" onclick="familyLoanEdit('${item.id}')">Editar</button><button type="button" class="danger" onclick="familyLoanRemove('${item.id}')">Excluir</button></div>
+        </article>`;
+    }
+
     function render() {
         const list = document.getElementById('loanList');
         const summary = document.getElementById('loanSummary');
         if (!list || !summary) return;
-        const active = Object.values(loans).filter(x => !x.deleted).sort((a, b) => (balance(a) === 0) - (balance(b) === 0) || a.person.localeCompare(b.person));
+        const active = Object.values(loans).filter(x => !x.deleted).sort((a, b) => a.person.localeCompare(b.person));
         const total = active.reduce((s, x) => s + x.principalCents, 0);
         const paid = active.reduce((s, x) => s + totalPaid(x), 0);
         const remaining = active.reduce((s, x) => s + balance(x), 0);
-        summary.innerHTML = `<div><span>Total emprestado</span><strong>${money(total)}</strong></div><div><span>Já pago</span><strong>${money(paid)}</strong></div><div><span>Ainda falta</span><strong>${money(remaining)}</strong></div>`;
-        if (!active.length) {
-            list.innerHTML = '<div class="loan-empty">Nenhum empréstimo cadastrado.</div>';
-            return;
-        }
-        list.innerHTML = active.map(item => {
-            const paidCents = totalPaid(item), remainingCents = balance(item), due = nextDue(item);
-            const modeLabel = item.mode === 'installments' ? `${item.installmentCount} parcela(s)` : 'Pagamento livre';
-            const payments = [...item.payments].sort((a,b) => b.date.localeCompare(a.date)).map(p => `<li><span>${formatarData(p.date)}${p.note ? ` · ${escapeHTML(p.note)}` : ''}</span><strong>${money(p.amountCents)}</strong><button type="button" onclick="familyLoanRemovePayment('${item.id}','${p.id}')">×</button></li>`).join('');
-            return `<article class="loan-card ${remainingCents === 0 ? 'paid' : ''}">
-                <div class="loan-card-head"><div><h4>${escapeHTML(item.person)}</h4><span>${escapeHTML(modeLabel)}</span></div><span class="loan-status">${remainingCents === 0 ? 'Quitado' : 'Em aberto'}</span></div>
-                <div class="loan-values"><div><span>Valor</span><strong>${money(item.principalCents)}</strong></div><div><span>Pago</span><strong>${money(paidCents)}</strong></div><div><span>Falta</span><strong>${money(remainingCents)}</strong></div></div>
-                ${due ? `<div class="loan-due">Próximo vencimento: <strong>${formatarData(due)}</strong></div>` : ''}
-                ${item.notes ? `<p class="loan-card-notes">${escapeHTML(item.notes)}</p>` : ''}
-                <details class="loan-payments"><summary>Pagamentos (${item.payments.length})</summary>${payments ? `<ul>${payments}</ul>` : '<p>Nenhum pagamento registrado.</p>'}</details>
-                <div class="loan-actions"><button type="button" onclick="familyLoanPay('${item.id}')" ${remainingCents === 0 ? 'disabled' : ''}>Registrar pagamento</button><button type="button" onclick="familyLoanEdit('${item.id}')">Editar</button><button type="button" class="danger" onclick="familyLoanRemove('${item.id}')">Excluir</button></div>
-            </article>`;
+        const groups = Object.groupBy ? Object.groupBy(active, item => item.person) : active.reduce((out, item) => ((out[item.person] ||= []).push(item), out), {});
+        const peopleSummary = Object.entries(groups).map(([person, items]) => {
+            const personTotal = items.reduce((s,x) => s + x.principalCents, 0);
+            const personPaid = items.reduce((s,x) => s + totalPaid(x), 0);
+            return `<article class="loan-person-summary-card"><strong>${escapeHTML(person)}</strong><span>${items.length} empréstimo(s)</span><div><b>Total ${money(personTotal)}</b><b>Pago ${money(personPaid)}</b><b>Falta ${money(Math.max(personTotal-personPaid,0))}</b></div></article>`;
         }).join('');
+        summary.innerHTML = `<div><span>Total geral emprestado</span><strong>${money(total)}</strong></div><div><span>Total já pago</span><strong>${money(paid)}</strong></div><div><span>Total que ainda falta</span><strong>${money(remaining)}</strong></div><section class="loan-people-summary">${peopleSummary}</section>`;
+        if (!active.length) { list.innerHTML = '<div class="loan-empty">Nenhum empréstimo cadastrado.</div>'; return; }
+        list.innerHTML = Object.entries(groups).map(([person, items]) => `<section class="loan-person-group"><div class="loan-person-head"><h3>${escapeHTML(person)}</h3><span>${items.length} empréstimo(s)</span></div><div class="loan-person-items">${items.map(renderLoanCard).join('')}</div></section>`).join('');
     }
 
     async function syncCloud(silent = true) {
         if (syncing || !navigator.onLine || typeof familyCatalogClient === 'undefined' || !familyCatalogClient || typeof familyCatalogUser === 'undefined' || !familyCatalogUser) return;
         syncing = true;
         try {
-            const { data: row, error } = await familyCatalogClient.from(TABLE).select('loans, loans_updated_at').eq('user_id', familyCatalogUser.id).maybeSingle();
+            const { data: row, error } = await familyCatalogClient.from(TABLE).select('loans, loans_updated_at, loan_people, loan_people_updated_at').eq('user_id', familyCatalogUser.id).maybeSingle();
             if (error) throw error;
             const remote = normalizeMap(row?.loans || {});
             const merged = merge(loans, remote);
             loans = merged;
+            people = mergePeople(people, row?.loan_people || {});
+            Object.values(loans).filter(x => !x.deleted && x.person).forEach(x => { if (!people[x.person]) people[x.person] = { deleted: false, updatedAt: x.updatedAt }; });
             localStorage.setItem(KEY, JSON.stringify(loans));
+            localStorage.setItem(PEOPLE_KEY, JSON.stringify(people));
+            populatePeople();
             render();
             const latest = Object.values(merged).reduce((max, x) => Math.max(max, Date.parse(x.updatedAt) || 0), 0);
-            const { error: saveError } = await familyCatalogClient.from(TABLE).upsert({ user_id: familyCatalogUser.id, loans: merged, loans_updated_at: latest ? new Date(latest).toISOString() : now() }, { onConflict: 'user_id' });
+            const { error: saveError } = await familyCatalogClient.from(TABLE).upsert({ user_id: familyCatalogUser.id, loans: merged, loans_updated_at: latest ? new Date(latest).toISOString() : now(), loan_people: people, loan_people_updated_at: now() }, { onConflict: 'user_id' });
             if (saveError) throw saveError;
         } catch (error) {
             if (!silent) console.warn('Falha ao sincronizar empréstimos:', error);
@@ -288,9 +358,11 @@
         sync: syncCloud
     };
     createUI();
+    activePeople().forEach(name => { if (!people[name]) people[name] = { deleted: false, updatedAt: now() }; });
+    populatePeople();
     render();
     setTimeout(() => syncCloud(true), 900);
     setInterval(() => syncCloud(true), 20000);
     window.addEventListener('online', () => setTimeout(() => syncCloud(false), 400));
-    familyCore?.registerModule?.('loans', { area: 'empréstimos', version: '2.13.2' });
+    familyCore?.registerModule?.('loans', { area: 'empréstimos', version: '2.14.0' });
 })();

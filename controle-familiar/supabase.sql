@@ -15,6 +15,8 @@ create table if not exists public.family_finance_state (
   card_settings_updated_at timestamptz,
   loans jsonb not null default '{}'::jsonb,
   loans_updated_at timestamptz,
+  loan_people jsonb not null default '{}'::jsonb,
+  loan_people_updated_at timestamptz,
   updated_at timestamptz not null default now()
 );
 
@@ -27,7 +29,9 @@ alter table public.family_finance_state
   add column if not exists card_settings jsonb not null default '{}'::jsonb,
   add column if not exists card_settings_updated_at timestamptz,
   add column if not exists loans jsonb not null default '{}'::jsonb,
-  add column if not exists loans_updated_at timestamptz;
+  add column if not exists loans_updated_at timestamptz,
+  add column if not exists loan_people jsonb not null default '{}'::jsonb,
+  add column if not exists loan_people_updated_at timestamptz;
 
 -- updated_at pertence somente aos lançamentos. Alterações no catálogo, no
 -- controle de pagamento das faturas ou nos dados dos cartões não devem fazer
