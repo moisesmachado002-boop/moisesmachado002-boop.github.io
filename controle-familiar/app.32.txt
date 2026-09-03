@@ -1,4 +1,4 @@
-/* v2.13.1 - aba separada de empréstimos pessoais. */
+/* v2.13.2 - aba separada de empréstimos pessoais. */
 (() => {
     const KEY = 'family-finance-loans-v1';
     const TABLE = 'family_finance_state';
@@ -101,16 +101,28 @@
 
     function createUI() {
         if (document.getElementById('familyLoansSection')) return;
-        const title = document.querySelector('.container > h2');
-        if (!title) return;
+        const nav = document.getElementById('familyTabsNav');
+        const areas = document.getElementById('familyTabsAreas');
+        if (!nav || !areas || typeof familyTabsAtivar !== 'function') return;
 
-        const tabs = document.createElement('nav');
-        tabs.className = 'family-main-tabs';
-        tabs.innerHTML = '<button type="button" class="active" data-view="finance">Cartões e faturas</button><button type="button" data-view="loans">Empréstimos</button>';
-        title.insertAdjacentElement('afterend', tabs);
+        if (Array.isArray(FAMILY_TAB_VALIDAS) && !FAMILY_TAB_VALIDAS.includes('emprestimos')) {
+            FAMILY_TAB_VALIDAS.push('emprestimos');
+        }
+
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'family-tab-btn';
+        button.dataset.familyTab = 'emprestimos';
+        button.setAttribute('role', 'tab');
+        button.setAttribute('aria-selected', 'false');
+        button.textContent = 'Empréstimos';
+        nav.appendChild(button);
 
         const section = document.createElement('section');
         section.id = 'familyLoansSection';
+        section.className = 'family-tab-panel';
+        section.dataset.familyPanel = 'emprestimos';
+        section.setAttribute('role', 'tabpanel');
         section.hidden = true;
         section.innerHTML = `
             <div class="loan-head"><div><h3>Empréstimos</h3><p>Dinheiro que você pegou emprestado, separado dos cartões.</p></div><button type="button" id="loanNew" class="btn-add">Novo empréstimo</button></div>
@@ -126,16 +138,11 @@
                 <div class="loan-form-actions"><button type="button" id="loanCancel" class="btn-secondary">Cancelar</button><button type="submit" class="btn-add">Salvar empréstimo</button></div>
             </form>
             <div id="loanList" class="loan-list"></div>`;
-        tabs.insertAdjacentElement('afterend', section);
+        areas.appendChild(section);
 
-        tabs.addEventListener('click', event => {
-            const button = event.target.closest('button[data-view]');
-            if (!button) return;
-            const loansView = button.dataset.view === 'loans';
-            document.body.classList.toggle('family-loans-active', loansView);
-            section.hidden = !loansView;
-            tabs.querySelectorAll('button').forEach(b => b.classList.toggle('active', b === button));
-            if (loansView) render();
+        button.addEventListener('click', () => {
+            familyTabsAtivar('emprestimos');
+            render();
         });
         document.getElementById('loanNew').addEventListener('click', () => openForm());
         document.getElementById('loanCancel').addEventListener('click', closeForm);
@@ -285,5 +292,5 @@
     setTimeout(() => syncCloud(true), 900);
     setInterval(() => syncCloud(true), 20000);
     window.addEventListener('online', () => setTimeout(() => syncCloud(false), 400));
-    familyCore?.registerModule?.('loans', { area: 'empréstimos', version: '2.13.1' });
+    familyCore?.registerModule?.('loans', { area: 'empréstimos', version: '2.13.2' });
 })();
