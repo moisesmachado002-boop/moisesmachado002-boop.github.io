@@ -1,0 +1,281 @@
+/* v2.13.0 - aba separada de empréstimos pessoais. */
+(() => {
+    const KEY = 'family-finance-loans-v1';
+    const TABLE = 'family_finance_state';
+    let loans = load();
+    let editingId = '';
+    let syncing = false;
+
+    const cents = value => Math.max(0, Math.round(Number(value) || 0));
+    const money = value => formatarMoeda(cents(value) / 100);
+    const now = () => new Date().toISOString();
+    const uid = () => (crypto?.randomUUID?.() || `loan-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    const validDate = value => /^\d{4}-\d{2}-\d{2}$/.test(String(value || ''));
+
+    function parseMoney(value) {
+        let text = String(value || '').trim();
+        if (!text) return NaN;
+        if (text.includes(',')) text = text.replace(/\./g, '').replace(',', '.');
+        const number = Number(text.replace(/[^\d.-]/g, ''));
+        return Number.isFinite(number) ? Math.round(number * 100) : NaN;
+    }
+
+    function normalizePayment(p = {}) {
+        return {
+            id: String(p.id || uid()),
+            date: validDate(p.date) ? p.date : '',
+            amountCents: cents(p.amountCents),
+            note: String(p.note || '').trim(),
+            createdAt: String(p.createdAt || now())
+        };
+    }
+
+    function normalizeLoan(item = {}) {
+        return {
+            id: String(item.id || uid()),
+            person: String(item.person || '').trim(),
+            principalCents: cents(item.principalCents),
+            mode: item.mode === 'installments' ? 'installments' : 'free',
+            installmentCount: item.mode === 'installments' ? Math.max(1, Math.round(Number(item.installmentCount) || 1)) : null,
+            firstDueDate: validDate(item.firstDueDate) ? item.firstDueDate : '',
+            notes: String(item.notes || '').trim(),
+            payments: Array.isArray(item.payments) ? item.payments.map(normalizePayment).filter(p => p.amountCents > 0) : [],
+            deleted: Boolean(item.deleted),
+            updatedAt: String(item.updatedAt || new Date(0).toISOString())
+        };
+    }
+
+    function normalizeMap(raw) {
+        const source = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+        return Object.fromEntries(Object.entries(source).map(([id, item]) => [id, normalizeLoan({ ...item, id })]));
+    }
+
+    function load() {
+        try { return normalizeMap(JSON.parse(localStorage.getItem(KEY) || '{}')); }
+        catch { return {}; }
+    }
+
+    function save({ sync = true } = {}) {
+        loans = normalizeMap(loans);
+        localStorage.setItem(KEY, JSON.stringify(loans));
+        render();
+        if (sync && navigator.onLine) setTimeout(() => syncCloud(false), 120);
+    }
+
+    function merge(a, b) {
+        const local = normalizeMap(a);
+        const remote = normalizeMap(b);
+        const result = {};
+        new Set([...Object.keys(local), ...Object.keys(remote)]).forEach(id => {
+            const x = local[id], y = remote[id];
+            if (!x) result[id] = y;
+            else if (!y) result[id] = x;
+            else result[id] = (Date.parse(x.updatedAt) || 0) >= (Date.parse(y.updatedAt) || 0) ? x : y;
+        });
+        return result;
+    }
+
+    function totalPaid(item) {
+        return item.payments.reduce((sum, p) => sum + cents(p.amountCents), 0);
+    }
+
+    function balance(item) {
+        return Math.max(item.principalCents - totalPaid(item), 0);
+    }
+
+    function addMonths(dateIso, amount) {
+        if (!validDate(dateIso)) return '';
+        const [y, m, d] = dateIso.split('-').map(Number);
+        const date = new Date(y, m - 1 + amount, 1);
+        const last = new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate();
+        return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(Math.min(d, last)).padStart(2, '0')}`;
+    }
+
+    function nextDue(item) {
+        if (balance(item) <= 0 || !validDate(item.firstDueDate)) return '';
+        if (item.mode === 'free') return item.firstDueDate;
+        const installmentValue = Math.ceil(item.principalCents / item.installmentCount);
+        const paidInstallments = Math.min(item.installmentCount - 1, Math.floor(totalPaid(item) / installmentValue));
+        return addMonths(item.firstDueDate, paidInstallments);
+    }
+
+    function createUI() {
+        if (document.getElementById('familyLoansSection')) return;
+        const title = document.querySelector('.container > h2');
+        if (!title) return;
+
+        const tabs = document.createElement('nav');
+        tabs.className = 'family-main-tabs';
+        tabs.innerHTML = '<button type="button" class="active" data-view="finance">Cartões e faturas</button><button type="button" data-view="loans">Empréstimos</button>';
+        title.insertAdjacentElement('afterend', tabs);
+
+        const section = document.createElement('section');
+        section.id = 'familyLoansSection';
+        section.hidden = true;
+        section.innerHTML = `
+            <div class="loan-head"><div><h3>Empréstimos</h3><p>Dinheiro que você pegou emprestado, separado dos cartões.</p></div><button type="button" id="loanNew" class="btn-add">Novo empréstimo</button></div>
+            <div class="loan-summary" id="loanSummary"></div>
+            <form id="loanForm" class="loan-form" hidden>
+                <input type="hidden" id="loanEditId">
+                <label><span>Nome da pessoa</span><input id="loanPerson" required placeholder="Quem emprestou"></label>
+                <label><span>Valor emprestado</span><input id="loanPrincipal" inputmode="decimal" required placeholder="0,00"></label>
+                <label><span>Forma de pagamento</span><select id="loanMode"><option value="free">Pagamento livre</option><option value="installments">Parcelado</option></select></label>
+                <label id="loanCountWrap" hidden><span>Quantidade de parcelas</span><input id="loanCount" type="number" min="1" value="1"></label>
+                <label><span>Primeiro vencimento</span><input id="loanDue" type="date"></label>
+                <label class="loan-notes"><span>Observações</span><textarea id="loanNotes" rows="3" placeholder="Detalhes do acordo"></textarea></label>
+                <div class="loan-form-actions"><button type="button" id="loanCancel" class="btn-secondary">Cancelar</button><button type="submit" class="btn-add">Salvar empréstimo</button></div>
+            </form>
+            <div id="loanList" class="loan-list"></div>`;
+        tabs.insertAdjacentElement('afterend', section);
+
+        tabs.addEventListener('click', event => {
+            const button = event.target.closest('button[data-view]');
+            if (!button) return;
+            const loansView = button.dataset.view === 'loans';
+            document.body.classList.toggle('family-loans-active', loansView);
+            section.hidden = !loansView;
+            tabs.querySelectorAll('button').forEach(b => b.classList.toggle('active', b === button));
+            if (loansView) render();
+        });
+        document.getElementById('loanNew').addEventListener('click', () => openForm());
+        document.getElementById('loanCancel').addEventListener('click', closeForm);
+        document.getElementById('loanMode').addEventListener('change', toggleCount);
+        document.getElementById('loanForm').addEventListener('submit', submitLoan);
+    }
+
+    function toggleCount() {
+        document.getElementById('loanCountWrap').hidden = document.getElementById('loanMode').value !== 'installments';
+    }
+
+    function openForm(id = '') {
+        editingId = id;
+        const item = id ? loans[id] : null;
+        document.getElementById('loanEditId').value = id;
+        document.getElementById('loanPerson').value = item?.person || '';
+        document.getElementById('loanPrincipal').value = item ? (item.principalCents / 100).toFixed(2).replace('.', ',') : '';
+        document.getElementById('loanMode').value = item?.mode || 'free';
+        document.getElementById('loanCount').value = item?.installmentCount || 1;
+        document.getElementById('loanDue').value = item?.firstDueDate || '';
+        document.getElementById('loanNotes').value = item?.notes || '';
+        toggleCount();
+        document.getElementById('loanForm').hidden = false;
+        document.getElementById('loanPerson').focus();
+    }
+
+    function closeForm() {
+        editingId = '';
+        document.getElementById('loanForm').hidden = true;
+    }
+
+    function submitLoan(event) {
+        event.preventDefault();
+        const person = document.getElementById('loanPerson').value.trim();
+        const principalCents = parseMoney(document.getElementById('loanPrincipal').value);
+        const mode = document.getElementById('loanMode').value;
+        const installmentCount = Math.round(Number(document.getElementById('loanCount').value) || 0);
+        const firstDueDate = document.getElementById('loanDue').value;
+        if (!person || !Number.isFinite(principalCents) || principalCents <= 0) return alert('Informe o nome e um valor maior que zero.');
+        if (mode === 'installments' && installmentCount < 1) return alert('Informe a quantidade de parcelas.');
+        if (firstDueDate && !validDate(firstDueDate)) return alert('Informe um vencimento válido.');
+        const id = editingId || uid();
+        loans[id] = normalizeLoan({
+            ...(loans[id] || {}), id, person, principalCents, mode,
+            installmentCount: mode === 'installments' ? installmentCount : null,
+            firstDueDate, notes: document.getElementById('loanNotes').value,
+            deleted: false, updatedAt: now()
+        });
+        save();
+        closeForm();
+    }
+
+    function addPayment(id) {
+        const item = loans[id];
+        if (!item || item.deleted || balance(item) <= 0) return;
+        const value = prompt(`Quanto foi pago para ${item.person}?\nSaldo atual: ${money(balance(item))}`, '');
+        if (value === null) return;
+        const amountCents = parseMoney(value);
+        if (!Number.isFinite(amountCents) || amountCents <= 0) return alert('Informe um valor pago maior que zero.');
+        if (amountCents > balance(item) && !confirm('O pagamento é maior que o saldo. Registrar mesmo assim?')) return;
+        const date = prompt('Data do pagamento (AAAA-MM-DD):', new Date().toISOString().slice(0, 10));
+        if (date === null) return;
+        if (!validDate(date)) return alert('Data inválida. Use o formato AAAA-MM-DD.');
+        const note = prompt('Observação do pagamento (opcional):', '') ?? '';
+        item.payments.push(normalizePayment({ id: uid(), date, amountCents, note, createdAt: now() }));
+        item.updatedAt = now();
+        save();
+    }
+
+    function removePayment(loanId, paymentId) {
+        const item = loans[loanId];
+        if (!item || !confirm('Excluir este pagamento?')) return;
+        item.payments = item.payments.filter(p => p.id !== paymentId);
+        item.updatedAt = now();
+        save();
+    }
+
+    function removeLoan(id) {
+        const item = loans[id];
+        if (!item || !confirm(`Excluir o empréstimo de ${item.person}?`)) return;
+        loans[id] = { ...item, deleted: true, updatedAt: now() };
+        save();
+    }
+
+    function render() {
+        const list = document.getElementById('loanList');
+        const summary = document.getElementById('loanSummary');
+        if (!list || !summary) return;
+        const active = Object.values(loans).filter(x => !x.deleted).sort((a, b) => (balance(a) === 0) - (balance(b) === 0) || a.person.localeCompare(b.person));
+        const total = active.reduce((s, x) => s + x.principalCents, 0);
+        const paid = active.reduce((s, x) => s + totalPaid(x), 0);
+        const remaining = active.reduce((s, x) => s + balance(x), 0);
+        summary.innerHTML = `<div><span>Total emprestado</span><strong>${money(total)}</strong></div><div><span>Já pago</span><strong>${money(paid)}</strong></div><div><span>Ainda falta</span><strong>${money(remaining)}</strong></div>`;
+        if (!active.length) {
+            list.innerHTML = '<div class="loan-empty">Nenhum empréstimo cadastrado.</div>';
+            return;
+        }
+        list.innerHTML = active.map(item => {
+            const paidCents = totalPaid(item), remainingCents = balance(item), due = nextDue(item);
+            const modeLabel = item.mode === 'installments' ? `${item.installmentCount} parcela(s)` : 'Pagamento livre';
+            const payments = [...item.payments].sort((a,b) => b.date.localeCompare(a.date)).map(p => `<li><span>${formatarData(p.date)}${p.note ? ` · ${escapeHTML(p.note)}` : ''}</span><strong>${money(p.amountCents)}</strong><button type="button" onclick="familyLoanRemovePayment('${item.id}','${p.id}')">×</button></li>`).join('');
+            return `<article class="loan-card ${remainingCents === 0 ? 'paid' : ''}">
+                <div class="loan-card-head"><div><h4>${escapeHTML(item.person)}</h4><span>${escapeHTML(modeLabel)}</span></div><span class="loan-status">${remainingCents === 0 ? 'Quitado' : 'Em aberto'}</span></div>
+                <div class="loan-values"><div><span>Valor</span><strong>${money(item.principalCents)}</strong></div><div><span>Pago</span><strong>${money(paidCents)}</strong></div><div><span>Falta</span><strong>${money(remainingCents)}</strong></div></div>
+                ${due ? `<div class="loan-due">Próximo vencimento: <strong>${formatarData(due)}</strong></div>` : ''}
+                ${item.notes ? `<p class="loan-card-notes">${escapeHTML(item.notes)}</p>` : ''}
+                <details class="loan-payments"><summary>Pagamentos (${item.payments.length})</summary>${payments ? `<ul>${payments}</ul>` : '<p>Nenhum pagamento registrado.</p>'}</details>
+                <div class="loan-actions"><button type="button" onclick="familyLoanPay('${item.id}')" ${remainingCents === 0 ? 'disabled' : ''}>Registrar pagamento</button><button type="button" onclick="familyLoanEdit('${item.id}')">Editar</button><button type="button" class="danger" onclick="familyLoanRemove('${item.id}')">Excluir</button></div>
+            </article>`;
+        }).join('');
+    }
+
+    async function syncCloud(silent = true) {
+        if (syncing || !navigator.onLine || typeof familyCatalogClient === 'undefined' || !familyCatalogClient || typeof familyCatalogUser === 'undefined' || !familyCatalogUser) return;
+        syncing = true;
+        try {
+            const { data: row, error } = await familyCatalogClient.from(TABLE).select('loans, loans_updated_at').eq('user_id', familyCatalogUser.id).maybeSingle();
+            if (error) throw error;
+            const remote = normalizeMap(row?.loans || {});
+            const merged = merge(loans, remote);
+            loans = merged;
+            localStorage.setItem(KEY, JSON.stringify(loans));
+            render();
+            const latest = Object.values(merged).reduce((max, x) => Math.max(max, Date.parse(x.updatedAt) || 0), 0);
+            const { error: saveError } = await familyCatalogClient.from(TABLE).upsert({ user_id: familyCatalogUser.id, loans: merged, loans_updated_at: latest ? new Date(latest).toISOString() : now() }, { onConflict: 'user_id' });
+            if (saveError) throw saveError;
+        } catch (error) {
+            if (!silent) console.warn('Falha ao sincronizar empréstimos:', error);
+        } finally { syncing = false; }
+    }
+
+    window.familyLoanPay = addPayment;
+    window.familyLoanEdit = openForm;
+    window.familyLoanRemove = removeLoan;
+    window.familyLoanRemovePayment = removePayment;
+    window.__familyLoans = { getAll: () => normalizeMap(loans), sync: syncCloud };
+    createUI();
+    render();
+    setTimeout(() => syncCloud(true), 900);
+    setInterval(() => syncCloud(true), 20000);
+    window.addEventListener('online', () => setTimeout(() => syncCloud(false), 400));
+    familyCore?.registerModule?.('loans', { area: 'empréstimos', version: '2.13.0' });
+})();

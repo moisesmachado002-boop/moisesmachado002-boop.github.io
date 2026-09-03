@@ -1,6 +1,6 @@
 # Controle Familiar — Arquitetura interna
 
-Versão de referência: **2.12.0**
+Versão de referência: **2.13.0**
 
 Este documento existe para tornar futuras alterações mais previsíveis e reduzir o risco de uma correção em uma área afetar outra.
 
@@ -28,6 +28,7 @@ Este documento existe para tornar futuras alterações mais previsíveis e reduz
 | Abas e preferências | navegação e competência padrão | `app.14`, `app.15` |
 | Filtros | pessoa, cartão e competências | `app.16`, `app.20`, `app.22`, `app.23` |
 | Cartões | limite, fechamento e vencimento | `app.17` |
+| Empréstimos | dívidas pessoais, parcelas, pagamentos e saldo | `app.32` |
 | Apresentação | identidade visual e próximas faturas | `app.18`, `app.19` |
 | Backup | exportação/importação completa | `app.21`, `app.24` |
 | Integridade | validações e auditoria dos dados | `app.25` |
@@ -44,6 +45,7 @@ A tabela familiar continua sendo `family_finance_state`.
 - `catalog`: cadastros.
 - `invoice_payments`: pagamentos das faturas.
 - `card_settings`: limites e datas dos cartões.
+- `loans`: empréstimos pessoais e histórico de pagamentos.
 
 Cada área deve continuar usando seu próprio marcador temporal interno/específico para não confundir alterações de naturezas diferentes.
 
