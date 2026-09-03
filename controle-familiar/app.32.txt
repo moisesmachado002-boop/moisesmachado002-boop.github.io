@@ -1,4 +1,4 @@
-/* v2.13.0 - aba separada de empréstimos pessoais. */
+/* v2.13.1 - aba separada de empréstimos pessoais. */
 (() => {
     const KEY = 'family-finance-loans-v1';
     const TABLE = 'family_finance_state';
@@ -271,11 +271,19 @@
     window.familyLoanEdit = openForm;
     window.familyLoanRemove = removeLoan;
     window.familyLoanRemovePayment = removePayment;
-    window.__familyLoans = { getAll: () => normalizeMap(loans), sync: syncCloud };
+    window.__familyLoans = {
+        getAll: () => normalizeMap(loans),
+        replaceAll: raw => {
+            loans = normalizeMap(raw);
+            Object.values(loans).forEach(item => { item.updatedAt = now(); });
+            save();
+        },
+        sync: syncCloud
+    };
     createUI();
     render();
     setTimeout(() => syncCloud(true), 900);
     setInterval(() => syncCloud(true), 20000);
     window.addEventListener('online', () => setTimeout(() => syncCloud(false), 400));
-    familyCore?.registerModule?.('loans', { area: 'empréstimos', version: '2.13.0' });
+    familyCore?.registerModule?.('loans', { area: 'empréstimos', version: '2.13.1' });
 })();

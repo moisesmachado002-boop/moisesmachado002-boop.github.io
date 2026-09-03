@@ -1,4 +1,4 @@
-/* v2.12.0 - autotestes de regressão somente de leitura.
+/* v2.13.1 - autotestes de regressão somente de leitura.
    Não cria, edita ou remove lançamentos. O resultado fica disponível em
    window.__familySelfTestLastReport e window.__familySelfTestRun(). */
 (() => {
@@ -47,19 +47,20 @@
             ['invoices', typeof familyInvoicePayments !== 'undefined', 'faturas'],
             ['cards', typeof familyCardSettings !== 'undefined', 'cartões'],
             ['backup', Boolean(window.__familyBackupV2), 'backup'],
-            ['integrity', typeof window.__familyIntegrityAudit === 'function', 'integridade']
+            ['integrity', typeof window.__familyIntegrityAudit === 'function', 'integridade'],
+            ['loans', Boolean(window.__familyLoans?.getAll), 'empréstimos']
         ];
         definitions.forEach(([name, available, area]) => {
             if (available) core.registerModule(name, { area });
         });
-        core.registerModule('self-tests', { area: 'qualidade', version: '2.12.0' });
+        core.registerModule('self-tests', { area: 'qualidade', version: '2.13.1' });
     }
 
     function familySelfTestRun() {
         const results = [];
 
         runTest(results, 'Versão do portal', () => ({
-            ok: String(window.__CONTROLE_FAMILIAR_VERSION || '') === '2.12.0',
+            ok: String(window.__CONTROLE_FAMILIAR_VERSION || '') === '2.13.1',
             detail: `Versão carregada: ${window.__CONTROLE_FAMILIAR_VERSION || 'não informada'}`
         }));
 
@@ -133,10 +134,11 @@
                 snapshot?.catalogo &&
                 snapshot?.pagamentos &&
                 snapshot?.configuracoesCartoes &&
+                snapshot?.emprestimos &&
                 snapshot?.preferencias;
             return {
                 ok: Boolean(ok),
-                detail: ok ? 'Lançamentos, cadastros, pagamentos, cartões e preferências presentes.' : 'Estrutura de backup incompleta.'
+                detail: ok ? 'Lançamentos, cadastros, pagamentos, cartões, empréstimos e preferências presentes.' : 'Estrutura de backup incompleta.'
             };
         });
 

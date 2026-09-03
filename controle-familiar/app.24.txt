@@ -48,6 +48,7 @@
         const configuracoesCartoes = typeof familyCardSettings !== 'undefined' && typeof familyCardNormalizeMap === 'function'
             ? familyCardNormalizeMap(familyCardSettings)
             : {};
+        const emprestimos = window.__familyLoans?.getAll?.() || {};
 
         let competenciaPadrao = '';
         try {
@@ -63,6 +64,7 @@
             catalogo,
             pagamentos,
             configuracoesCartoes,
+            emprestimos,
             preferencias: {
                 competenciaFaturaPadrao: competenciaValida(competenciaPadrao) ? competenciaPadrao : ''
             }
@@ -116,6 +118,10 @@
         else localStorage.setItem(FAMILY_CARD_SETTINGS_KEY, JSON.stringify(familyCardSettings));
     }
 
+    function familyBackupAplicarEmprestimos(raw) {
+        if (window.__familyLoans?.replaceAll) window.__familyLoans.replaceAll(raw || {});
+    }
+
     function familyBackupAtualizarTela() {
         if (typeof popularSelects === 'function') popularSelects();
         if (typeof popularFiltroAnos === 'function') popularFiltroAnos();
@@ -159,7 +165,7 @@
                 }
 
                 let mensagem = backupV2
-                    ? `Restaurar o backup completo com ${gastos.length} lançamento(s), cadastros, pagamentos e configurações dos cartões?`
+                    ? `Restaurar o backup completo com ${gastos.length} lançamento(s), cadastros, pagamentos, cartões e empréstimos?`
                     : `Este é um backup antigo com ${gastos.length} lançamento(s). Restaurar somente os lançamentos?\n\nCadastros, pagamentos e configurações atuais dos cartões serão mantidos.`;
 
                 if (!confirm(mensagem)) return;
@@ -172,6 +178,7 @@
                     familyBackupAplicarCatalogo(conteudo.catalogo, agora);
                     familyBackupAplicarPagamentos(conteudo.pagamentos, agora);
                     familyBackupAplicarConfiguracoesCartoes(conteudo.configuracoesCartoes, agora);
+                    familyBackupAplicarEmprestimos(conteudo.emprestimos);
 
                     const comp = conteudo?.preferencias?.competenciaFaturaPadrao || '';
                     if (competenciaValida(comp) && typeof FATURA_PADRAO_KEY !== 'undefined') {
